@@ -7,15 +7,19 @@ from utils.train import create_src_mask, create_trg_mask
 
 
 
-
 def run(model, tokenizer, config, max_tokens=100):
     with torch.no_grad():
-        print('Type "quit" to terminate Translation')
+        print('Type "quit" to terminate Model Inference')
         while True:
             seq = input('\nUser Input sentence >> ')
             if seq == 'quit':
-                print(' --- Terminate the Translation! ---')
+                print(' --- Terminate the Survice! ---')
                 break
+            
+            #Tokenize user Input with Moses
+            moses_tokenizer = MosesTokenizer(lang='en')
+            moses_detokenizer = MosesDetokenizer(lang='en')
+            src = moses_tokenizer.tokenize(src)
 
             #Convert tokens to ids with sentencepiece vocab
             src = tokenizer.EncodeAsIds(seq)
@@ -45,19 +49,21 @@ def run(model, tokenizer, config, max_tokens=100):
                 
             pred_seq = trg_indice[1:]
             pred_seq = tokenizer.Decode(pred_seq)
+            pred_seq = moses_detokenizer.detokenize(pred.split())
 
-            print(f"Translated sentence >> {pred_seq}")
-
+            print(f"Model Output Sentence >> {pred_seq}")
 
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-model', required=True)
+    parser.add_argument('-task', required=True)
     parser.add_argument('-scheduler', default='constant', required=False)
     args = parser.parse_args()
     
     assert args.model in ['valilla', 'light']
+    assert args.task in ['translate', 'dialogue']
 
     config = Config(args)
     config.device = torch.device('cpu')

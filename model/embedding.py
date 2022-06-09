@@ -41,7 +41,7 @@ class TokenEmbedding(nn.Module):
 
 
 class PosEncoding(nn.Module):
-	def __init__(self, config, max_len=500):
+	def __init__(self, config, max_len=5000):
 		super(PosEncoding, self).__init__()
 		
 		pe = torch.zeros(max_len, config.emb_dim)

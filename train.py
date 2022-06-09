@@ -20,7 +20,7 @@ from utils.train import trian_epoch, eval_epoch
 
 def run(config):
     #set checkpoint, record path
-    chk_dir = f"checkpoints/"
+    chk_dir = f"checkpoints/{config.task}/"
     os.makedirs(chk_dir, exist_ok=True)
     
     chk_file = f"{config.model}_states.pt"
@@ -53,8 +53,8 @@ def run(config):
         start_time = time.time()
 
         print(f"Epoch {epoch}/{config.n_epochs}")
-        train_loss = trans_train(model, train_dataloader, criterion, optimizer, config)
-        valid_loss = trans_eval(model, valid_dataloader, criterion, config)
+        train_loss = train_epoch(model, train_dataloader, criterion, optimizer, config)
+        valid_loss = eva_epoch(model, valid_dataloader, criterion, config)
         
         end_time = time.time()
         epoch_mins, epoch_secs = epoch_time(start_time, end_time)
@@ -102,10 +102,12 @@ def run(config):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-model', required=True)
+    parser.add_argument('-task', required=True)
     parser.add_argument('-scheduler', default='constant', required=False)
     args = parser.parse_args()
     
     assert args.model in ['vanilla', 'light']
+    assert args.model in ['translate', 'dialogue']
     assert args.scheduler in ['constant', 'noam', 'cosine_annealing_warm', 'exponential', 'step']
     
     set_seed()

@@ -41,6 +41,7 @@ class Config(object):
                 setattr(self, p[0], p[1])
 
         self.model = args.model
+        self.task = args.task
         self.scheduler = args.scheduler
         self.clip = 1
         self.pad_idx = 1
@@ -50,7 +51,7 @@ class Config(object):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         if self.scheduler == 'constant':
-            self.learning_rate = 1e-3
+            self.learning_rate = 1e-4
 
         elif self.scheduler in ['noam', 'cosine_annealing_warm']:
             self.learning_rate = 1e-9
@@ -61,7 +62,7 @@ class Config(object):
 
     def print_attr(self):
         for attribute, value in self.__dict__.items():
-            print(attribute, ': ', value)
+            print(f"* {attribute}: {value}")
 
 
 
@@ -78,15 +79,12 @@ def count_params(model):
 
 
 def load_model(config):
-    
     if config.model == 'vanilla':
-        model = Vanilla_Transformer(config)    
+        model = Vanilla_Transformer(config)
     elif config.model == 'light':
         model = Light_Transformer(config)
-          
+
     model.apply(init_xavier)
     model.to(config.device)
-    print(f'{config.model} model has loaded.\nThe model has {count_params(model):,} parameters')
-    print()
-    
+    print(f'{config.model} Transformer model has loaded.\nThe model has {count_params(model):,} parameters\n')
     return model

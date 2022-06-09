@@ -89,7 +89,7 @@ class ResidualConn(nn.Module):
 	def __init__(self, config):
 		super(ResidualConn, self).__init__()
 
-		self.layer_norm = nn.LayerNorm(config.hidden_dim)
+		self.layer_norm = nn.LayerNorm(config.hidden_dim, eps=1e-6, elementwise_affine=True)
 		self.dropout = nn.Dropout(config.dropout_ratio)
 
 

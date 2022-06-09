@@ -4,6 +4,7 @@ while getopts i:p: flag; do
     case "${flag}" in
         i) input=${OPTARG};;
         p) prefix=${OPTARG};;
+        s) size=${OPTARG};;
     esac
 done
 

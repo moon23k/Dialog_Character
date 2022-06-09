@@ -23,7 +23,7 @@ def create_trg_mask(trg, pad_idx=1):
 
 
 
-def epoch_train(model, dataloader, criterion, optimizer, config):
+def train_epoch(model, dataloader, criterion, optimizer, config):
     model.train()
     epoch_loss = 0
     total_len = len(dataloader)
@@ -53,27 +53,28 @@ def epoch_train(model, dataloader, criterion, optimizer, config):
 
 
 
-def epoch_eval(model, dataloader, criterion, config):
+def eval_epoch(model, dataloader, criterion, config):
     model.eval()
     epoch_loss = 0
     total_len = len(dataloader)
 
-    with torch.no_grad():
-        for i, batch in enumerate(dataloader):
-            src, trg = batch[0].to(config.device), batch[1].to(config.device)
-            
-            trg_input = trg[:, :-1]
-            trg_y = trg[:, 1:].contiguous().view(-1)
-
+    
+    for i, batch in enumerate(dataloader):
+        src, trg = batch[0].to(config.device), batch[1].to(config.device)
+        
+        trg_input = trg[:, :-1]
+        trg_y = trg[:, 1:].contiguous().view(-1)
+    
+        with torch.no_grad():
             pred = model(src, trg_input)
-            
-            pred_dim = pred.shape[-1]
-            pred = pred.contiguous().view(-1, pred_dim)
+        
+        pred_dim = pred.shape[-1]
+        pred = pred.contiguous().view(-1, pred_dim)
 
-            loss = criterion(pred, trg_y)
-            epoch_loss += loss.item()
+        loss = criterion(pred, trg_y)
+        epoch_loss += loss.item()
 
-            if (i + 1) % 10 == 0:
-                print(f"---- Step: {i+1}/{total_len} Eval Loss: {round(loss, 3)}")
+        if (i + 1) % 10 == 0:
+            print(f"---- Step: {i+1}/{total_len} Eval Loss: {round(loss, 3)}")
 
     return epoch_loss / total_len
