@@ -10,14 +10,12 @@ Comparisons were made for two Natural Language Generation Tasks(Neural Machine T
 
 ## Model Architecture
 
-<br>
+<div>
+  <img src="https://user-images.githubusercontent.com/71929682/172880786-4974606f-ecf3-4aa4-907b-6f7ac2beda36.png" width=300 height=450>
+  <img src="https://user-images.githubusercontent.com/71929682/172881156-edb1fc4b-b3c1-427f-9af7-df0ad4be79c6.png" width=550 height=450>
+</div>
 
-### Vanilla Transformer
-
-<br>
-
-### Light Transformer
-
+The Figures above represent Vanilla Transformer and Universal Transformer each.
 
 <br>
 
