@@ -1,9 +1,12 @@
 # Light_Transformer
 
-## Introduction
+This repo covers two Transformer Architectures. One is Vanilla_Transformer and the other is Light_Transformer. Vanilla Transformer is simple implementation of famous paper "Attention is all you need" and Light Transformer is Lightened version of Vanilla Transformer. To Lighten Transformer Architecture, Parameter Sharing and Factorizing Techniques has applied.
+
+Ultimate goal of the experiment is to Lighten Model with minimal performance degradation.
+Comparisons were made for two Natural Language Generation Tasks(Neural Machine Translation and Single turn Dialogue Generation)
+
 
 <br>
-
 
 ## Model Architecture
 
@@ -22,21 +25,15 @@
 
 ## Training Setup
 
-### In common
-* Dataset: downsized WMT14 (EN-DE)
+* Neural Machine Translation Dataset: downsized WMT14 (EN-DE)
+* Single Turn Dialogue Generation Dataset: Processed Single-Turn Dialogue Dataset
 * Tokenization: BPE
 * Batch_size: 128
-* Num of Epochs:
-* Learning Rate:
-* 
+* Num of Epochs: 10
+* Learning Rate: 1e-4
+* scheduler: Noam
 
 
-
-### Only on Vanilla Transformer
-
-<br>
-
-### Only on Light Transformer
 
 
 <br>
