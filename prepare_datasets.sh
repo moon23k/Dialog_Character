@@ -14,6 +14,7 @@ done
 
 #Download Data
 echo "Downloading Datasets"
+python3 -m pip install -U datasets
 python3 ../data_processing/download_wmt.py
 bash ../data_processing/download_dialogue.sh
 python3 ../data_processing/process_dialogue.py
@@ -64,4 +65,5 @@ for data in "${datasets[@]}"; do
         done
     done
 done
+
 rm -rf sentencepiece

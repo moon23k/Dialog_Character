@@ -47,7 +47,7 @@ class Light_Transformer(nn.Module):
         super(Light_Transformer, self).__init__()
 
         self.embedding = TransformerEmbedding(config)
-        self.emb_fc = nn.Linear(config)
+        self.emb_fc = nn.Linear(config.emb_dim, config.hidden_dim)
         self.encoder = Encoder(config)
         self.decoder = Decoder(config)
         

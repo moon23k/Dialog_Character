@@ -5,8 +5,8 @@ import torch
 import numpy as np
 import torch.nn as nn
 import torch.backends.cudnn as cudnn
-from models.transformer.vanilla_module import Vanilla_Transformer
-from models.transformer.light_module import Light_Transformer
+from models.vanilla_module import Vanilla_Transformer
+from models.light_module import Light_Transformer
 
 
 
@@ -45,7 +45,7 @@ class Config(object):
         self.scheduler = args.scheduler
         self.clip = 1
         self.pad_idx = 1
-        self.n_epochs = 1
+        self.n_epochs = 10
         self.batch_size = 128
         self.best_valid_loss = float('inf')
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
