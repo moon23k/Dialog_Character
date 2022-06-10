@@ -13,7 +13,7 @@ from utils.util import Config, epoch_time, set_seed
 from utils.data import get_dataloader
 from utils.model import load_model
 from utils.scheduler import get_scheduler
-from utils.train import trian_epoch, eval_epoch
+from utils.train import train, eval_epoch
 
 
 
@@ -54,7 +54,7 @@ def run(config):
 
         print(f"Epoch {epoch}/{config.n_epochs}")
         train_loss = train_epoch(model, train_dataloader, criterion, optimizer, config)
-        valid_loss = eva_epoch(model, valid_dataloader, criterion, config)
+        valid_loss = eval_epoch(model, valid_dataloader, criterion, config)
         
         end_time = time.time()
         epoch_mins, epoch_secs = epoch_time(start_time, end_time)
