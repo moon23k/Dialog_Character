@@ -9,9 +9,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from utils.util import Config, epoch_time, set_seed
+from utils.util import Config, epoch_time, set_seed, load_model
 from utils.data import get_dataloader
-from utils.model import load_model
 from utils.scheduler import get_scheduler
 from utils.train import train, eval_epoch
 
@@ -107,7 +106,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     
     assert args.model in ['vanilla', 'light']
-    assert args.model in ['translate', 'dialogue']
+    assert args.task in ['translate', 'dialogue']
     assert args.scheduler in ['constant', 'noam', 'cosine_annealing_warm', 'exponential', 'step']
     
     set_seed()

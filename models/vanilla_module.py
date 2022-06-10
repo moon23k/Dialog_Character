@@ -8,7 +8,6 @@ from utils.train import create_src_mask, create_trg_mask
 
 
 
-
 class Encoder(nn.Module):
     def __init__(self, config):
         super(Encoder, self).__init__()

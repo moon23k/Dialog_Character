@@ -46,7 +46,7 @@ def train_epoch(model, dataloader, criterion, optimizer, config):
         epoch_loss += loss.item()
 
         if (i + 1) % 1000 == 0:
-            print(f"---- Step: {i+1}/{total_len} Train Loss: {round(loss, 3)}")
+            print(f"---- Step: {i+1}/{total_len} Train Loss: {loss:.3f}")
 
     return epoch_loss / total_len
 
@@ -75,6 +75,6 @@ def eval_epoch(model, dataloader, criterion, config):
         epoch_loss += loss.item()
 
         if (i + 1) % 10 == 0:
-            print(f"---- Step: {i+1}/{total_len} Eval Loss: {round(loss, 3)}")
+            print(f"---- Step: {i+1}/{total_len} Eval Loss: {loss:.3f}")
 
     return epoch_loss / total_len
