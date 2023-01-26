@@ -5,7 +5,8 @@ from module.model import load_models
 from module.train import Trainer, PreTrainer
 from module.test import Tester
 from transformers import (set_seed, 
-                          BlenderbotSmallTokenizerFast, 
+                          BertTokenizerFast,
+                          BlenderbotSmallTokenizer, 
                           BlenderbotSmallForConditionalGeneration)
 
 
@@ -93,9 +94,9 @@ def generate(config, model, split):
     model.eval()
     with torch.no_grad():
         for _, batch in tqdm(enumerate(dataloader)):   
-            input_ids = batch[f'{config.src}_ids'].to(config.device)
-            attention_mask = batch[f'{config.src}_mask'].to(config.device)
-            labels = batch[f'{config.trg}_ids'].tolist()
+            input_ids = batch['input_ids'].to(config.device)
+            attention_mask = batch['attention_mask'].to(config.device)
+            labels = batch['labels'].tolist()
 
             with torch.autocast(device_type=config.device_type, dtype=torch.float16):
                 preds = model.generate(input_ids=input_ids, attention_mask=attention_mask, 
@@ -110,6 +111,15 @@ def generate(config, model, split):
         assert os.path.exists(f'data/gen_{split}.json')
 
 
+def load_tokenizer(config, model_type):
+    assert model_type in ['generator', 'discriminator']
+    if model_type == 'generator':
+        tokenizer = BlenderbotSmallTokenizer.from_pretrained(config.gen_mname, model_max_length=128)
+    elif model_type == 'discriminator':
+        tokenizer = BertTokenizerFast.from_pretrained(config.dis_mname, model_max_length=128)
+    return tokenizer
+
+
 def main(args):
     set_seed(42)
     config = Config(args.task, args.task)    
@@ -122,7 +132,7 @@ def main(args):
         setattr(config, 'pad_id', discriminator.pad_id)
 
     if config.task not in  ['pretrain','train']:
-        tokenizer = T5TokenizerFast.from_pretrained(config.model_name, model_max_length=300)
+        tokenizer = BlenderbotSmallTokenizer.from_pretrained(config.model_name, model_max_length=300)
 
     #Actual Processing Codes
     if config.mode == 'pretrain':

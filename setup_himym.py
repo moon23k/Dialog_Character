@@ -1,11 +1,6 @@
 import os, json, requests, argparse
-from setup_daily import tokenize_data
-
 from tqdm import tqdm
 from bs4 import BeautifulSoup as bs
-from transformers import BlenderbotSmallTokenizer
-
-
 
 
 
@@ -101,8 +96,8 @@ def split_dialog(script, char='barney'):
 
             if prior_char != char and curr_char == char:        
                 temp = dict()
-                temp['uttr'] = prior_uttr
-                temp['resp'] = curr_uttr
+                temp['uttr'] = prior_uttr.lower()
+                temp['resp'] = curr_uttr.lower()
 
                 dialog.append(temp)
 
@@ -113,26 +108,45 @@ def split_dialog(script, char='barney'):
 
 
 
+def save_data(data_obj, character):
+    if character == 'ted':       #tot: 5446
+        train, test = data_obj[:5000], data_obj[5000:]
+
+    if character == 'barney':    #tot: 4307
+        train, test = data_obj[:4000], data_obj[4000:]
+
+    if character == 'marshall':  #tot: 3867
+        train, test = data_obj[:3500], data_obj[3500:]
+
+    if character == 'lily':      #tot: 3345
+        train, test = data_obj[:3000], data_obj[3000:]
+
+    if character == 'robin':     #tot: 3482
+        train, test = data_obj[:3000], data_obj[3000:]
+    
+    data_dict = {k:v for k, v in zip(['train', 'test'], [train, test])}
+    for key, val in data_dict.items():
+        with open(f'data/{character}_{key}.json', 'w') as f:
+            json.dump(val, f)        
+        assert os.path.exists(f'data/{character}_{key}.json')    
+
+
 
 def main(character):
-    tokenizer = BlenderbotSmallTokenizer.from_pretrained("facebook/blenderbot_small-90M")
-    
-    urls = get_urls()
     data = []
-    for url in urls:
+    urls = get_urls()
+    
+    for url in tqdm(urls):
         html = requests.get(url)
         soup = bs(html.text, "html.parser")
         orig = soup.select(".content")[0].text.split('\n')
 
-        cleaned = clear_script(orig)
+        cleaned = clean_script(orig)
         splited = split_script(cleaned)
         dialog = split_dialog(splited, character)
-        data.append(tokenized)
+        data.extend(dialog)
 
-    data = tokenize_data(data)
-    with open(f'data/himym_{character}.json', 'w') as f:
-        json.dump(data, f)
-
+    save_data(data, character)
     
 
 
