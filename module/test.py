@@ -39,7 +39,7 @@ class Tester:
                 #generate predictions
                 preds = self.g_model.generate(input_ids=g_ids,
                                               attention_mask=g_masks, 
-                                              max_new_tokens=self.max_tokens, 
+                                              max_new_tokens=128, 
                                               use_cache=True)
                 #Decode generator predictions
                 preds = self.g_tokenizer.batch_decode(preds, skip_special_tokens=True)
@@ -49,6 +49,7 @@ class Tester:
                 logits = self.d_model(**d_encodings)
                 scores += logits[logits > 0.5]
 
+        scores = scores / len(dataloader)
 
         print('Test Results')
         print(f"  >> Test Score: {scores:.2f}")
