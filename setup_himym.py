@@ -108,29 +108,6 @@ def split_dialog(script, char='barney'):
 
 
 
-def save_data(data_obj, character):
-    if character == 'ted':       #tot: 5446
-        train, test = data_obj[:5000], data_obj[5000:]
-
-    if character == 'barney':    #tot: 4307
-        train, test = data_obj[:4000], data_obj[4000:]
-
-    if character == 'marshall':  #tot: 3867
-        train, test = data_obj[:3500], data_obj[3500:]
-
-    if character == 'lily':      #tot: 3345
-        train, test = data_obj[:3000], data_obj[3000:]
-
-    if character == 'robin':     #tot: 3482
-        train, test = data_obj[:3000], data_obj[3000:]
-    
-    data_dict = {k:v for k, v in zip(['train', 'test'], [train, test])}
-    for key, val in data_dict.items():
-        with open(f'data/{character}_{key}.json', 'w') as f:
-            json.dump(val, f)        
-        assert os.path.exists(f'data/{character}_{key}.json')    
-
-
 
 def main(character):
     data = []
@@ -146,7 +123,9 @@ def main(character):
         dialog = split_dialog(splited, character)
         data.extend(dialog)
 
-    save_data(data, character)
+    with open(f'data/{character}.json', 'w') as f:
+        json.dump(data, f)
+    assert os.path.exists(f'data/{character}.json')
     
 
 

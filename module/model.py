@@ -103,17 +103,3 @@ def load_discriminator(config):
 
     print_model_desc(discriminator)
     return discriminator.to(config.device)
-
-
-
-def load_models(config):
-    if config.mode == 'pretrain':
-        if config.model_type == 'generator':
-            return load_generator(config), None
-        elif config.model_type == 'discriminator':
-            return None, load_discriminator(config)
-
-    elif config.mode == 'train':
-        return load_generator(config), load_discriminator(config)
-    else:
-        return load_generator(config), None    

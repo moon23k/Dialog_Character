@@ -1,20 +1,34 @@
 import json, torch
 from torch.utils.data import DataLoader
-from torch.nn.utils.rnn import pad_sequence
 
 
 
 class Dataset(torch.utils.data.Dataset):
-    def __init__(self, config):
+    def __init__(self, config, split):
         super().__init__()
-        self.character = config.character
-        self.data = self.load_data(self.character)
+
+        self.character = None
+        if config.mode == 'pretrain':
+            self.character = config.character
+            self.theshold = config.data_threshold
+
+        self.data = self.load_data(split, self.character)
 
 
-    def load_data(self, character):
-        f_name = f'data/himym_{character}.json'
+    def load_data(self, split, character=None):
+        if self.mode == 'pretrain':
+            f_name = f'data/{character}.json'
+        else:
+            f_name = f"data/{split}.json"    
+
         with open(f_name, 'r') as f:
             data = json.load(f)
+
+        if self.mode == 'pretrain' and split == 'train':
+            return data[:self.threshold]
+        else:
+            return data[self.threshold:]
+
         return data
 
 
@@ -23,43 +37,15 @@ class Dataset(torch.utils.data.Dataset):
 
     
     def __getitem__(self, idx):
-        input_ids = self.data[idx]['input_ids']
-        attention_mask = self.data[idx]['attention_mask']
-        labels = self.data[idx]['labels']
-        return input_ids, attention_mask, labels
+        uttr = self.data[idx]['uttr']
+        resp = self.data[idx]['resp']
+        return uttrn, resp
 
 
-def pad_batch(batch_list, pad_id):
-    return pad_sequence(batch_list,
-                        batch_first=True,
-                        padding_value=pad_id)
 
-
-def load_dataloader(config):
-    global pad_id
-    pad_id = config.pad_id    
-
-    def collate_fn(batch):
-        ids_batch, mask_batch, labels_batch = [], [], []
-
-        for input_ids, attention_mask, labels in batch:
-            ids_batch.append(torch.LongTensor(input_ids)) 
-            mask_batch.append(torch.LongTensor(attention_mask))
-            labels_batch.append(torch.LongTensor(labels))
-        
-        ids_batch = pad_batch(ids_batch, pad_id)
-        mask_batch = pad_batch(mask_batch, pad_id)
-        labels_batch = pad_batch(labels_batch, pad_id)
-
-        return {'input_ids': ids_batch,
-                'attention_mask': mask_batch,
-                'labels': labels_batch}
-
-
-    dataset = Dataset(config)
-    return DataLoader(dataset, 
+def load_dataloader(config, split):
+    return DataLoader(Dataset(config, split), 
                       batch_size=config.batch_size, 
-                      shuffle=False,
-                      collate_fn=collate_fn,
+                      shuffle=True,
                       num_workers=2,
                       pin_memory=True)

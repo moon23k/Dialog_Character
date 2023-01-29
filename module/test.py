@@ -1,53 +1,54 @@
+import torch
 from tqdm import tqdm
-import torch, time, evaluate
 
 
 
 class Tester:
-    def __init__(self, config, model, tokenizer, test_dataloader):
-        super(Tester, self).__init__()
+    def __init__(self, config, 
+                 g_model, d_model, 
+                 g_tokenizer, d_tokenizer
+                 test_dataloader):
         
-        self.model = model
-        self.src = config.src
-        self.trg = config.trg
-        self.task = config.task
-        self.tokenizer = tokenizer
+        self.g_model = g_model
+        self.d_model = d_model
+        
+        self.g_tokenizer = g_tokenizer
+        self.d_tokenizer = d_tokenizer
+        
         self.device = config.device
         self.dataloader = test_dataloader
 
 
-    @staticmethod
-    def measure_time(start_time, end_time):
-        elapsed_time = end_time - start_time
-        elapsed_min = int(elapsed_time / 60)
-        elapsed_sec = int(elapsed_time - (elapsed_min * 60))
-        return f"{elapsed_min}m {elapsed_sec}s"
-
 
     def test(self):
-        self.model.eval()
-        metric_module = evaluate.load('bleu')
-        
-        start_time = time.time()
+        scores = 0
+
+        self.g_model.eval()
+        self.d_model.eval()
+
         with torch.no_grad():
-            for _, batch in tqdm(enumerate(self.dataloader)):   
-                
-                input_ids = batch[f'{self.src}_ids'].to(self.device)
-                attention_mask = batch[f'{self.src}_mask'].to(self.device)
-                labels = batch[f'{self.trg}_ids'].to(self.device)
-                                
-                preds = self.model.generate(input_ids=input_ids, attention_mask=attention_mask,
-                                            max_new_tokens=300, use_cache=True)
-                
-                preds = self.tokenizer.batch_decode(preds, skip_special_tokens=True)
-                labels = self.tokenizer.batch_decode(labels, skip_special_tokens=True)
+            for idx, batch in tqdm(enumerate(self.dataloader)):   
+                uttr, resp = batch[0], batch[1]
 
-                metric_module.add_batch(predictions=preds, 
-                                        references=[[l] for l in labels])    
+                #tokenize inputs for generator
+                g_uttr_encodings = self.g_tokenizer(uttr).to(self.device)
+                g_ids = g_uttr_encodings.input_ids
+                g_masks = g_uttr_encodings.attention_mask
+                g_labels = self.g_tokenizer(resp).input_ids
 
-        bleu_score = metric_module.compute()['bleu'] * 100
+                #generate predictions
+                preds = self.g_model.generate(input_ids=g_ids,
+                                              attention_mask=g_masks, 
+                                              max_new_tokens=self.max_tokens, 
+                                              use_cache=True)
+                #Decode generator predictions
+                preds = self.g_tokenizer.batch_decode(preds, skip_special_tokens=True)
+
+                #Tokenize inputs for discriminator
+                d_encodings = self.d_tokenizer(preds, return_tensors='pt').to(self.device)
+                logits = self.d_model(**d_encodings)
+                scores += logits[logits > 0.5]
+
 
         print('Test Results')
-        print(f"  >> BLEU Score: {bleu_score:.2f}")
-        print(f"  >> Spent Time: {self.measure_time(start_time, time.time())}")
-    
+        print(f"  >> Test Score: {scores:.2f}")
