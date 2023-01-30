@@ -2,7 +2,7 @@ import os, json, argparse, torch
 from tqdm import tqdm
 from module.model import load_generator, load_discriminator
 from module.data import load_dataloader
-from module.train import Trainer
+from module.train import Trainer, PreTrainer
 from module.test import Tester
 from transformers import (set_seed, 
                           BertTokenizerFast,
@@ -22,6 +22,7 @@ class Config(object):
 
         self.clip = 1
         self.lr = 5e-5
+        self.max_len = 128
         self.n_epochs = 10
         self.batch_size = 16
         self.iters_to_accumulate = 4
@@ -54,12 +55,14 @@ class Config(object):
 
 
 def load_tokenizers(config):
-    g_tokenizer = BlenderbotSmallTokenizer.from_pretrained(config.gen_mname, model_max_length=128)
+    g_tokenizer = BlenderbotSmallTokenizer.from_pretrained(config.g_mname, 
+                                                           model_max_length=config.max_len)
     
     if config.mode == 'inference':
         d_tokenizer = None    
     else:
-        d_tokenizer = BertTokenizerFast.from_pretrained(config.dis_mname, model_max_length=128)
+        d_tokenizer = BertTokenizerFast.from_pretrained(config.d_mname, 
+                                                        model_max_length=config.max_len)
     
     return g_tokenizer, d_tokenizer
 
@@ -69,9 +72,14 @@ def train(config, g_model, d_model, g_tokenizer, d_tokenizer):
     train_dataloader = load_dataloader(config, 'train')
     valid_dataloader = load_dataloader(config, 'valid')
 
-    trainer = Trainer(config, g_model, d_model, 
-                      g_tokenizer, d_tokenizer, 
-                      train_dataloader, valid_dataloader)
+    if config.mode == 'pretrain':
+        trainer = PreTrainer(config, g_model, d_model,
+                             g_tokenizer, d_tokenizer,
+                             train_dataloader, valid_dataloader)
+    elif config.mode == 'train':
+        trainer = Trainer(config, g_model, d_model, 
+                          g_tokenizer, d_tokenizer, 
+                          train_dataloader, valid_dataloader)
     trainer.train()
 
 
@@ -79,8 +87,7 @@ def train(config, g_model, d_model, g_tokenizer, d_tokenizer):
 def test(config, g_model, d_model, g_tokenizer, d_tokenizer):
     test_dataloader = load_dataloader(config, 'test')
     tester = Tester(config, g_model, d_model, 
-                    g_tokenizer, d_tokenizer, 
-                    train_dataloader, valid_dataloader)    
+                    g_tokenizer, d_tokenizer, test_dataloader)    
     tester.test()    
 
 
@@ -100,7 +107,7 @@ def inference(g_model, g_tokenizer):
 
         #convert user input_seq into model input_ids
         input_ids = g_tokenizer(input_seq)['input_ids']
-        output_ids = g_model.generate(input_ids, beam_size=4, max_new_tokens=300, use_cache=True)
+        output_ids = g_model.generate(input_ids, max_new_tokens=128, use_cache=True)
         output_seq = g_tokenizer.decode(output_ids, skip_special_tokens=True)
 
         #Search Output Sequence
@@ -113,14 +120,12 @@ def main(args):
 
     config = Config(args)    
     g_tokenizer, d_tokenizer = load_tokenizers(config)
-    setattr(config, 'pad_id', tokenizer.pad_token_id)
+    setattr(config, 'pad_id', g_tokenizer.pad_token_id)
 
     g_model = load_generator(config)
     d_model = load_discriminator(config)
     
-    if config.mode == 'pretrain':
-        train(config, g_model, d_model, g_tokenizer, d_tokenizer)
-    elif config.mode == 'train':
+    if 'train' in config.mode:
         train(config, g_model, d_model, g_tokenizer, d_tokenizer)
     elif config.mode == 'test':
         test(config, g_model, d_model, g_tokenizer, d_tokenizer)
@@ -140,7 +145,7 @@ if __name__ == '__main__':
 
     if args.mode == 'train':
         assert os.path.exists('ckpt/discriminator_base.pt')
-    else:
+    elif args.mode == 'test':
         assert os.path.exists('ckpt/discriminator_base.pt')
         assert os.path.exists('ckpt/discriminator.pt')
         assert os.path.exists('ckpt/generator.pt')

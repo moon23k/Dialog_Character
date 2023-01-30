@@ -7,10 +7,11 @@ class Dataset(torch.utils.data.Dataset):
     def __init__(self, config, split):
         super().__init__()
 
+        self.mode = config.mode
         self.character = None
-        if config.mode == 'pretrain':
+        if self.mode == 'pretrain':
             self.character = config.character
-            self.theshold = config.data_threshold
+            self.threshold = config.data_threshold
 
         self.data = self.load_data(split, self.character)
 
@@ -39,7 +40,7 @@ class Dataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         uttr = self.data[idx]['uttr']
         resp = self.data[idx]['resp']
-        return uttrn, resp
+        return uttr, resp
 
 
 

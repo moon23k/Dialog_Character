@@ -9,13 +9,13 @@ from transformers import (BertModel, BertConfig,
 
 
 class Discriminator(nn.Module):
-    def __init__(self, config, dis_config=None):
+    def __init__(self, config, d_config=None):
         super(Discriminator, self).__init__()
 
-        if dis_config is not None:
-            self.encoder = BertModel(dis_config)
+        if d_config is not None:
+            self.encoder = BertModel(d_config)
         else:
-            self.encoder = BertModel.from_pretrained(config.dis_mname)
+            self.encoder = BertModel.from_pretrained(config.d_mname)
 
         self.classifier = nn.Linear(self.encoder.config.hidden_size, 1)
         self.dropout = nn.Dropout(self.encoder.config.hidden_dropout_prob)
@@ -60,7 +60,7 @@ def print_model_desc(model):
 
 def load_generator(config):
     if config.mode == 'pretrain':
-        generator = BlenderbotSmallForConditionalGeneration.from_pretrained(config.gen_mname)
+        generator = BlenderbotSmallForConditionalGeneration.from_pretrained(config.g_mname)
         print(f"Generator for {config.mode.upper()} has loaded")
         print_model_desc(generator)
         return generator.to(config.device)
@@ -69,13 +69,14 @@ def load_generator(config):
     generator = BlenderbotSmallForConditionalGeneration(generator_config)
     print(f"Generator for {config.mode.upper()} has loaded")
 
-    ckpt = config.gen_pre_ckpt if config.mode in ['train', 'generate'] else config.gen_ckpt
+    ckpt = config.g_ckpt
     assert os.path.exists(ckpt)
     generator_state = torch.torch.load(ckpt, map_location=config.device)['model_state_dict']
     generator.load_state_dict(generator_state)
 
     print(f"Model States has loaded from {ckpt}")
     print_model_desc(generator)
+
     return generator.to(config.device)
 
 
@@ -83,19 +84,19 @@ def load_generator(config):
 def load_discriminator(config):
     if config.mode == 'pretrain':
         discriminator = Discriminator(config)
+        print(f"Discriminator for {config.mode.upper()} has loaded")
 
-    print(f"Discriminator for {config.mode.upper()} has loaded")
+    if config.mode in ['train', 'test']:
+        assert os.path.exists(config.d_base_ckpt)
 
-    if config.mode == 'train':
-        assert os.path.exists(config.dis_pre_ckpt)
+        d_config = BertConfig()
+        d_config.update({'hidden_size': 512})
+        d_config.update({'intermediate_size': 2048})
+        d_config.update({'num_attention_heads': 8})
+        d_config.update({'num_hidden_layers': 4})
 
-        dis_config = BertConfig()
-        dis_config.update({'hidden_size': 512})
-        dis_config.update({'intermediate_size': 2048})
-        dis_config.update({'num_attention_heads': 8})
-        dis_config.update({'num_hidden_layers': 4})
-
-        discriminator = Discriminator(config, dis_config)
+        discriminator = Discriminator(config, d_config)
+        print(f"Discriminator for {config.mode.upper()} has loaded")
         
         model_state = torch.load(config.dis_pre_ckpt, map_location=config.device)['model_state_dict']        
         discriminator.load_state_dict(model_state)

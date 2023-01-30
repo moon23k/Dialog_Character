@@ -6,9 +6,9 @@ from tqdm import tqdm
 class Tester:
     def __init__(self, config, 
                  g_model, d_model, 
-                 g_tokenizer, d_tokenizer
+                 g_tokenizer, d_tokenizer,
                  test_dataloader):
-        
+
         self.g_model = g_model
         self.d_model = d_model
         
@@ -16,6 +16,7 @@ class Tester:
         self.d_tokenizer = d_tokenizer
         
         self.device = config.device
+        self.max_len = config.max_len
         self.dataloader = test_dataloader
 
 
@@ -39,7 +40,7 @@ class Tester:
                 #generate predictions
                 preds = self.g_model.generate(input_ids=g_ids,
                                               attention_mask=g_masks, 
-                                              max_new_tokens=128, 
+                                              max_new_tokens=self.max_len, 
                                               use_cache=True)
                 #Decode generator predictions
                 preds = self.g_tokenizer.batch_decode(preds, skip_special_tokens=True)

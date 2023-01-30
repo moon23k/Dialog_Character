@@ -7,12 +7,8 @@ from collections import namedtuple
 
 
 
-class Trainer:
-    def __init__(self, config, 
-                 g_model, d_model, 
-                 g_tokenizer, d_tokenizer, 
-                 train_dataloader, valid_dataloader):
-
+class TrainerBase:
+    def __init__(self, config):
         self.mode = config.mode
         self.clip = config.clip
         self.device = config.device
@@ -21,43 +17,21 @@ class Trainer:
         self.scaler = torch.cuda.amp.GradScaler()
         self.iters_to_accumulate = config.iters_to_accumulate
 
-        self.g_model = g_model
-        self.d_model = d_model
-
-        self.g_tokenizer = gen_tokenizer
-        self.d_tokenizer = dis_tokenizer
-
-        self.train_dataloader = train_dataloader
-        self.valid_dataloader = valid_dataloader
-        
-        self.g_optimizer = optim.AdamW(params=self.generator.parameters(), lr=config.lr)
-        self.d_optimizer = optim.AdamW(params=self.discriminator.parameters(), lr=config.lr)
-
-        self.g_scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.gen_optimizer, 'min')
-        self.d_scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.dis_optimizer, 'min')
-
-        self.g_ckpt = config.g_ckpt
-        self.d_ckpt = config.d_ckpt
-        
         self.g_inputs = namedtuple('Generator_Inputs', ('ids', 'masks', 'labels'))
         self.d_inputs = namedtuple('Discriminator_Inputs', ('ids', 'masks', 'labels'))
-
-        self.record_path = 'ckpt/gan_train.json'
-        self.record_keys = ['epoch', 'g_train_loss', 'g_valid_loss',
-                            'd_train_loss', 'd_valid_loss', 'g_lr', 'd_lr', 'train_time']
 
 
     def print_epoch(self, record_dict):
         print(f"""Epoch {record_dict['epoch']}/{self.n_epochs} | \
               Time: {record_dict['train_time']}""".replace(' ' * 14, ''))
         
-        if isinstance(self, PreTrainer):
-            print(f"""  >> Train Loss: {record_dict['train_loss']:.3f} | \
-                  Valid Loss: {record_dict['valid_loss']:.3f}\n""".replace(' ' * 14, ''))
-        elif isinstance(self, Trainer):
+        if self.mode == 'pretrain':
+            print(f"""  >> Discriminator Train Loss: {record_dict['train_loss']:.3f} | \
+                  Discriminator Valid Loss: {record_dict['valid_loss']:.3f}\n""".replace(' ' * 14, ''))
+        else:
             print(f"""  >> Generator Train Loss: {record_dict['g_train_loss']:.3f} | \
                   Generator Valid Loss: {record_dict['g_valid_loss']:.3f}""".replace(' ' * 14, ''))            
-            print(f"""  >> Discriminator Train Loss: {record_dict['dis_train_loss']:.3f} | \
+            print(f"""  >> Discriminator Train Loss: {record_dict['d_train_loss']:.3f} | \
                   Discriminator Valid Loss: {record_dict['d_valid_loss']:.3f}\n""".replace(' ' * 14, ''))
 
 
@@ -76,79 +50,114 @@ class Trainer:
                     ckpt)
 
 
+    def tokenizer_encode(self, tokenizer, inputs):
+        return tokenizer(inputs, padding=True, max_length=128,
+                         truncation=True, return_tensors='pt').to(self.device)
+
+
     def update_inputs(self, batch):
         uttr, resp = batch[0], batch[1]
 
         #tokenize inputs for generator
-        g_uttr_encodings = self.g_tokenizer(uttr).to(self.device)
-        g_ids = g_uttr_encodings.input_ids
-        g_masks = g_uttr_encodings.attention_mask
-        g_labels = self.g_tokenizer(resp).input_ids
+        g_encodings = self.tokenizer_encode(self.g_tokenizer, uttr)
+        g_ids = g_encodings.input_ids
+        g_masks = g_encodings.attention_mask
+        g_labels = self.tokenizer_encode(self.g_tokenizer, resp).input_ids
 
         #generate predictions
         preds = self.g_model.generate(input_ids=g_ids,
                                       attention_mask=g_masks, 
-                                      max_new_tokens=self.max_tokens, 
+                                      max_new_tokens=128, 
                                       use_cache=True)
         #Decode generator predictions
         preds = self.g_tokenizer.batch_decode(preds, skip_special_tokens=True)
 
-
         #Tokenize inputs for discriminator
-        d_inputs = resp + pred
-        d_encodings = self.d_tokenizer(d_inputs, return_tensors='pt').to(self.device)
-        
+        d_encodings = self.tokenizer_encode(self.d_tokenizer, resp + preds)
         d_ids = d_encodings.input_ids
         d_masks = d_encodings.attention_mask
-        d_labels = torch.cat((torch.zeros(), torch.ones()), dim=0).to(self.device)
+
+        batch_size = d_ids.size(0) // 2
+        d_labels = torch.cat((torch.zeros(batch_size), torch.ones(batch_size)), dim=0).to(self.device)
         d_indice = torch.randperm(d_ids.size(0))
 
         #Shuffle Discriminator inputs
         d_ids = d_ids[d_indice].to(self.device)
-        d_masks = dis_masks[d_indice].to(self.device)
+        d_masks = d_masks[d_indice].to(self.device)
         d_labels = d_labels[d_indice].to(self.device)
 
         #Update inputs
-        self.gen_inputs.input_ids = gen_ids
-        self.gen_inputs.attention_mask = gen_masks
-        self.gen_inputs.labels = gen_labels
+        self.g_inputs.ids = g_ids
+        self.g_inputs.masks = g_masks
+        self.g_inputs.labels = g_labels
 
-        self.dis_inputs.input_ids = gen_ids
-        self.dis_inputs.attention_mask = gen_masks
-        self.dis_inputs.labels = gen_labels
+        self.d_inputs.ids = g_ids
+        self.d_inputs.masks = g_masks
+        self.d_inputs.labels = g_labels
 
+
+
+class Trainer(TrainerBase):
+    def __init__(self, config, 
+                 g_model, d_model, 
+                 g_tokenizer, d_tokenizer, 
+                 train_dataloader, valid_dataloader):
+        
+        super(Trainer, self).__init__(config)
+
+        self.g_model = g_model
+        self.d_model = d_model
+
+        self.g_tokenizer = g_tokenizer
+        self.d_tokenizer = d_tokenizer
+
+        self.train_dataloader = train_dataloader
+        self.valid_dataloader = valid_dataloader
+        
+        self.g_optimizer = optim.AdamW(params=self.g_model.parameters(), lr=config.lr)
+        self.d_optimizer = optim.AdamW(params=self.d_model.parameters(), lr=config.lr)
+
+        self.g_scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.g_optimizer, 'min')
+        self.d_scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.d_optimizer, 'min')
+
+        self.g_ckpt = config.g_ckpt
+        self.d_ckpt = config.d_ckpt
+
+        self.record_path = 'ckpt/train.json'
+        self.record_keys = ['epoch', 'g_train_loss', 'g_valid_loss',
+                            'd_train_loss', 'd_valid_loss', 'g_lr', 'd_lr', 'train_time']
 
 
     def get_losses(self):
         with torch.autocast(device_type=self.device_type, dtype=torch.float16):
-            gen_loss = self.generator(input_ids=self.gen_inputs.ids, 
-                                      attention_mask=self.gen_inputs.masks,
-                                      labels=self.gen_inputs.labels).loss
+            g_loss = self.g_model(input_ids=self.g_inputs.ids, 
+                                  attention_mask=self.g_inputs.masks,
+                                  labels=self.g_inputs.labels).loss
 
-            dis_loss = self.discriminator(input_ids=self.dis_inputs.ids, 
-                                          attention_mask=self.dis_inputs.masks,
-                                          labels=self.dis_inputs.labels).loss
+            d_loss = self.d_model(input_ids=self.d_inputs.ids, 
+                                  attention_mask=self.d_inputs.masks,
+                                  labels=self.d_inputs.labels).loss
 
-        return (gen_loss + dis_loss.item()) * 0.5, dis_loss
+        return (g_loss + d_loss.item()) * 0.5, d_loss
+
 
 
     def train_epoch(self):
-        gen_epoch_loss, dis_epoch_loss = 0, 0
+        g_epoch_loss, d_epoch_loss = 0, 0
         tot_len = len(self.train_dataloader)
         
-        self.generator.eval() if self.mode == 'pretrain' else self.generator.train()
-        self.discriminator.train()
-
+        self.g_model.train()
+        self.d_model.train()
 
         for idx, batch in tqdm(enumerate(self.train_dataloader)):
             self.update_inputs(batch)
-            gen_loss, dis_loss = self.get_losses()
+            g_loss, d_loss = self.get_losses()
 
-            gen_loss = gen_loss / self.iters_to_accumulate
-            dis_loss = dis_loss / self.iters_to_accumulate
+            g_loss = g_loss / self.iters_to_accumulate
+            d_loss = d_loss / self.iters_to_accumulate
 
-            self.scaler.scale(gen_loss).backward()
-            self.scaler.scale(dis_loss).backward()
+            self.scaler.scale(g_loss).backward()
+            self.scaler.scale(d_loss).backward()
             
             if (idx + 1) % self.iters_to_accumulate == 0:
                 #Gradient Clipping
@@ -165,38 +174,38 @@ class Trainer:
                 self.gen_optimizer.zero_grad()
                 self.dis_optimizer.zero_grad()
 
-            gen_epoch_loss += gen_loss.item()
-            dis_epoch_loss += dis_loss.item()
+            gen_epoch_loss += g_loss.item()
+            dis_epoch_loss += d_loss.item()
         
-        gen_epoch_loss = round(gen_epoch_loss / tot_len, 3)
-        dis_epoch_loss = round(dis_epoch_loss / tot_len, 3)
-        return gen_epoch_loss, dis_epoch_loss
+        g_epoch_loss = round(g_epoch_loss / tot_len, 3)
+        d_epoch_loss = round(d_epoch_loss / tot_len, 3)
+        return g_epoch_loss, d_epoch_loss
     
 
 
     def valid_epoch(self):
-        gen_epoch_loss, dis_epoch_loss = 0, 0
+        g_epoch_loss, d_epoch_loss = 0, 0
         tot_len = len(self.valid_dataloader)
 
-        self.generator.eval()
-        self.discriminator.eval()
+        self.g_model.eval()
+        self.d_model.eval()
         
         with torch.no_grad():
             for _, batch in tqdm(enumerate(self.valid_dataloader)):   
                 self.update_inputs(batch)       
-                gen_loss, dis_loss = self.get_losses()
+                g_loss, d_loss = self.get_losses()
 
-                gen_epoch_loss += gen_loss.item()
-                dis_epoch_loss += dis_loss.item()
+                g_epoch_loss += g_loss.item()
+                d_epoch_loss += d_loss.item()
     
-        gen_epoch_loss = round(gen_epoch_loss / tot_len, 3)
-        dis_epoch_loss = round(dis_epoch_loss / tot_len, 3)
-        return gen_epoch_loss, dis_epoch_loss
+        g_epoch_loss = round(g_epoch_loss / tot_len, 3)
+        d_epoch_loss = round(d_epoch_loss / tot_len, 3)
+        return g_epoch_loss, d_epoch_loss
 
 
 
     def train(self):
-        gen_best_loss, dis_best_loss, records = float('inf'), float('inf'), []
+        g_best_loss, d_best_loss, records = float('inf'), float('inf'), []
         for epoch in range(1, self.n_epochs + 1):
             start_time = time.time()
 
@@ -227,3 +236,112 @@ class Trainer:
         #save train_records
         with open(self.record_path, 'w') as fp:
             json.dump(records, fp)        
+
+
+
+class PreTrainer(TrainerBase):
+    def __init__(self, config, 
+                 g_model, d_model, 
+                 g_tokenizer, d_tokenizer, 
+                 train_dataloader, valid_dataloader):
+        
+        super(PreTrainer, self).__init__(config)
+
+        self.g_model = g_model
+        self.d_model = d_model
+
+        self.g_tokenizer = g_tokenizer
+        self.d_tokenizer = d_tokenizer
+
+        self.train_dataloader = train_dataloader
+        self.valid_dataloader = valid_dataloader
+        
+        self.optimizer = optim.AdamW(params=self.d_model.parameters(), lr=config.lr)
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, 'min')
+
+        self.ckpt = config.d_ckpt
+
+        self.record_path = 'ckpt/pretrain.json'
+        self.record_keys = ['epoch', 'train_loss', 'valid_loss', 'lr', 'train_time']
+
+
+
+    def train_epoch(self):
+        epoch_loss = 0, 0
+        tot_len = len(self.train_dataloader)
+        
+        self.g_model.eval()
+        self.d_model.train()
+
+        for idx, batch in tqdm(enumerate(self.train_dataloader)):
+            self.update_inputs(batch)
+            with torch.autocast(device_type=self.device_type, dtype=torch.float16):
+                loss = self.d_model(input_ids=self.d_inputs.ids, 
+                                    attention_mask=self.d_inputs.masks,
+                                    labels=self.d_inputs.labels).loss
+            
+            loss = loss / self.iters_to_accumulate
+            self.scaler.scale(loss).backward()
+            
+            if (idx + 1) % self.iters_to_accumulate == 0:
+                #Gradient Clipping
+                self.scaler.unscale_(self.optimizer)
+                nn.utils.clip_grad_norm_(self.d_model.parameters(), max_norm=self.clip)
+                
+                #Gradient Update & Scaler Update
+                self.scaler.step(self.optimizer)
+                
+                self.scaler.update()
+                self.optimizer.zero_grad()
+
+            epoch_loss += loss.item()
+        
+        epoch_loss = round(epoch_loss / tot_len, 3)
+        return epoch_loss
+    
+
+
+    def valid_epoch(self):
+        epoch_loss = 0, 0
+        tot_len = len(self.valid_dataloader)
+
+        self.g_model.eval()
+        self.d_model.eval()
+        
+        with torch.no_grad():
+            for _, batch in tqdm(enumerate(self.valid_dataloader)):   
+                self.update_inputs(batch)       
+                loss = self.d_model(input_ids=self.d_inputs.ids, 
+                                    attention_mask=self.d_inputs.masks,
+                                    labels=self.d_inputs.labels).loss
+                epoch_loss += loss.item()
+    
+        epoch_loss = round(epoch_loss / tot_len, 3)
+        return epoch_loss
+
+
+
+    def train(self):
+        best_loss, records = float('inf'), []
+        for epoch in range(1, self.n_epochs + 1):
+            start_time = time.time()
+
+            record_vals = [epoch, self.train_epoch(), self.valid_epoch(), 
+                           self.optimizer.param_groups[0]['lr'],
+                           self.measure_time(start_time, time.time())]
+            record_dict = {k: v for k, v in zip(self.record_keys, record_vals)}
+            
+            records.append(record_dict)
+            self.print_epoch(record_dict)
+            
+            curr_loss = record_dict['valid_loss']
+            self.scheduler.step(curr_loss)
+
+            #save best discriminator states
+            if best_loss >= curr_loss:
+                best_loss = curr_loss
+                self.save_ckpt(epoch, self.ckpt, self.d_model, self.optimizer)
+
+        #save train_records
+        with open(self.record_path, 'w') as fp:
+            json.dump(records, fp)                    
