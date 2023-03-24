@@ -1,10 +1,15 @@
-## Character Dialogue Generation
+## Dialogue Generation via Sequence GAN
 
-People communicate with others through conversation. And one's personality is shown in the process of conversation. Personality makes the conversation much more enjoyable than the conversation without it. However, in the case of a dialog generation model which learns human conversation patterns based on large-scale data, such individuality does not exist. This repo presents a methodology that can give a personality to a model using seqGAN technique and HIMYM conversation dataset.
+
+Dialogue Generation is a task which generating appropriate dialogue responses for given utterances.
+Generalization of dialog generation models is more difficult than other Natural Language Generation Tasks because of the two main factors. First is that loss function-based learning induces the model to generate only general answers. Second is that there is no quantitative evaluation metrics to determine the appropriateness of generated sentences.
+Of course, it is possible to overcome these limitations through learning based on large-scale data like GPT, but it is difficult to apply this method to general individuals.
+
+
 
 <br><br>
 
-## Model
+## Model Structure
 
 **Generator**
 > Generator Model takes source-language sequence as input and returns translated target-language sequence. In this experiment, generator is pretrained BlenderBot-small model. Generator already knows how to generate response according to the user utterance. But all responses the model generates is general and typical answers, without any characteristics. To model have the characterisic, GAN Style of Training will be used. Training details will be mentioned in training chapter in below  
@@ -16,19 +21,14 @@ People communicate with others through conversation. And one's personality is sh
 
 <br><br>
 
-## Data
+## Training Configurations
 
-**HIMYM**
-> How I Met Your Mother is a famous sitcom. The sitcom has five main characters with strong personalities. Each character is Ted, Barney, Marshall, Lily, and Robin.
-
-<br>
-
-**Daily Mail**
-> This dataset is well known dataset for dialogue generation task. Original dataset is designed for a multi-turn dialogues, but I split those into single-turns. This dataset will be used in the Training Session to make the generator generate Characterisic responses on the general daily dialigue situations.
 
 <br><br>
 
 ## Training Process
+
+The Training Process consists of two stages.
 
 **Pretrain**
 > We deal two models, each of Generator and Discriminator. But as we use pretrained Generator, only Discriminator get trained in this Pre-Training session. Discriminator learns to distinguish real and generator made response sequence. Discriminator will be trained on Binary Cross Entropy Loss.
@@ -47,4 +47,4 @@ People communicate with others through conversation. And one's personality is sh
 
 ## Reference
 
-<br>
+[SeqGAN: Sequence Generative Adversarial Nets with Policy Gradient](https://arxiv.org/abs/1609.05473)
