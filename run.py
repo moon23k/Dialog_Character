@@ -1,13 +1,11 @@
 import os, json, argparse, torch
-from tqdm import tqdm
-from module.model import load_generator, load_discriminator
 from module.data import load_dataloader
-from module.train import Trainer, PreTrainer
+from module.model import load_generator, load_discriminator
+from module.train import GenTrainer, DisTrainer, Trainer
 from module.test import Tester
 from transformers import (set_seed, 
                           BertTokenizerFast,
-                          BlenderbotSmallTokenizer, 
-                          BlenderbotSmallForConditionalGeneration)
+                          BlenderbotSmallTokenizer)
 
 
 
@@ -18,14 +16,17 @@ class Config(object):
         self.character = args.char
         
         self.g_mname = "facebook/blenderbot_small-90M"
-        self.d_mname = "bert-base-uncased"        
+        self.d_mname = "prajjwal1/bert-small"        
 
         self.clip = 1
         self.lr = 5e-5
         self.max_len = 128
         self.n_epochs = 10
-        self.batch_size = 16
+        self.batch_size = 32
         self.iters_to_accumulate = 4
+
+        self.early_stop = True
+        self.patience = 3
         
         use_cuda = torch.cuda.is_available()
         self.device_type = 'cuda' if use_cuda else 'cpu'
@@ -33,12 +34,12 @@ class Config(object):
         if self.mode == 'inference':
             self.device = torch.device('cpu')
         else:
-            self.device = torch.device('cuda' if use_cuda else 'cpu')
+            self.device = torch.device(self.device_type)
 
         self.g_ckpt = 'ckpt/generator.pt'
         self.d_ckpt = 'ckpt/discriminator.pt'
+        self.g_base_ckpt = 'ckpt/generator_base.pt'
         self.d_base_ckpt = 'ckpt/discriminator_base.pt'
-
 
         if self.mode == 'pretrain':
             threshold_dict = {'ted': 5000,
@@ -48,6 +49,7 @@ class Config(object):
                               'robin': 3000}
             self.data_threshold = threshold_dict[self.character]
 
+
     def print_attr(self):
         for attribute, value in self.__dict__.items():
             print(f"* {attribute}: {value}")
@@ -55,16 +57,32 @@ class Config(object):
 
 
 def load_tokenizers(config):
-    g_tokenizer = BlenderbotSmallTokenizer.from_pretrained(config.g_mname, 
-                                                           model_max_length=config.max_len)
+    g_tokenizer = BlenderbotSmallTokenizer.from_pretrained(config.g_mname, model_max_length=config.max_len)
     
     if config.mode == 'inference':
-        d_tokenizer = None    
-    else:
-        d_tokenizer = BertTokenizerFast.from_pretrained(config.d_mname, 
-                                                        model_max_length=config.max_len)
+        return g_tokenizer, None    
     
+    d_tokenizer = BertTokenizerFast.from_pretrained(config.d_mname, model_max_length=config.max_len)    
     return g_tokenizer, d_tokenizer
+
+
+
+def pretrain(config, g_model, d_model, g_tokenizer, d_tokenizer):
+    train_dataloader = load_dataloader(config, 'train')
+    valid_dataloader = load_dataloader(config, 'valid')        
+
+    #PreTrain Generator with Character Dataset
+    g_trainer = GenTrainer(config, g_model, g_tokenizer, train_dataloader, valid_dataloader)
+    g_trainer.train()
+
+    #Load Pre Trained model states 
+    g_model_state = torch.torch.load(config.g_base_ckpt, map_location=config.device)['model_state_dict']
+    g_model.load_state_dict(g_model_state)
+
+    #PreTrain Discriminator
+    d_trainer = DisTrainer(config, g_model, d_model, g_tokenizer,
+                           d_tokenizer, train_dataloader, valid_dataloader)
+    d_trainer.train()
 
 
 
@@ -72,14 +90,8 @@ def train(config, g_model, d_model, g_tokenizer, d_tokenizer):
     train_dataloader = load_dataloader(config, 'train')
     valid_dataloader = load_dataloader(config, 'valid')
 
-    if config.mode == 'pretrain':
-        trainer = PreTrainer(config, g_model, d_model,
-                             g_tokenizer, d_tokenizer,
-                             train_dataloader, valid_dataloader)
-    elif config.mode == 'train':
-        trainer = Trainer(config, g_model, d_model, 
-                          g_tokenizer, d_tokenizer, 
-                          train_dataloader, valid_dataloader)
+    trainer = Trainer(config, g_model, d_model, g_tokenizer, 
+                      d_tokenizer, train_dataloader, valid_dataloader)
     trainer.train()
 
 
@@ -108,24 +120,27 @@ def inference(g_model, g_tokenizer):
         #convert user input_seq into model input_ids
         input_ids = g_tokenizer(input_seq)['input_ids']
         output_ids = g_model.generate(input_ids, max_new_tokens=128, use_cache=True)
-        output_seq = g_tokenizer.decode(output_ids, skip_special_tokens=True)
+        output_seq = g_tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0]
 
         #Search Output Sequence
-        print(f"Model Out Sequence >> {output_seq}")       
+        print(f"Model Out Sequence >> {output_seq}")
 
 
 
 def main(args):
-    set_seed(42)
 
+    set_seed(42)
     config = Config(args)    
     g_tokenizer, d_tokenizer = load_tokenizers(config)
     setattr(config, 'pad_id', g_tokenizer.pad_token_id)
 
     g_model = load_generator(config)
     d_model = load_discriminator(config)
-    
-    if 'train' in config.mode:
+
+
+    if config.mode == 'pretrain':
+        pretrain(config, g_model, d_model, g_tokenizer, d_tokenizer)
+    elif config.mode == 'train':
         train(config, g_model, d_model, g_tokenizer, d_tokenizer)
     elif config.mode == 'test':
         test(config, g_model, d_model, g_tokenizer, d_tokenizer)
@@ -140,13 +155,13 @@ if __name__ == '__main__':
     parser.add_argument('-char', required=True)
     
     args = parser.parse_args()
-    assert args.mode in ['pretrain', 'train', 'test', 'inference']
-    assert args.char in ['ted', 'barney', 'marshall', 'lily', 'robin']
+    assert args.mode.lower() in ['pretrain', 'train', 'test', 'inference']
+    assert args.char.lower() in ['ted', 'barney', 'marshall', 'lily', 'robin']
 
     if args.mode == 'train':
+        assert os.path.exists('ckpt/generator_base.pt')
         assert os.path.exists('ckpt/discriminator_base.pt')
     elif args.mode == 'test':
-        assert os.path.exists('ckpt/discriminator_base.pt')
         assert os.path.exists('ckpt/discriminator.pt')
         assert os.path.exists('ckpt/generator.pt')
 

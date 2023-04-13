@@ -9,6 +9,7 @@ class Dataset(torch.utils.data.Dataset):
 
         self.mode = config.mode
         self.character = None
+        
         if self.mode == 'pretrain':
             self.character = config.character
             self.threshold = config.data_threshold
