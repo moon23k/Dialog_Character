@@ -2,6 +2,7 @@ import time, json, torch
 import torch.nn as nn
 import torch.amp as amp
 import torch.optim as optim
+from tqdm import tqdm
 
 
 
@@ -42,12 +43,12 @@ class TrainerBase:
         g_encodings = self.tokenize(self.g_tokenizer, uttr)
 
         with torch.autocast(device_type=self.device_type, dtype=torch.float16):
-            preds = self.g_model.generate(input_ids=g_encodings.input_ids,
-                                          attention_mask=g_encodings.attention_mask, 
-                                          max_new_tokens=self.max_len, 
-                                          use_cache=True)
+            pred = self.g_model.generate(input_ids=g_encodings.input_ids,
+                                         attention_mask=g_encodings.attention_mask, 
+                                         max_new_tokens=self.max_len, 
+                                         use_cache=True)
 
-        return self.g_tokenizer.batch_decode(preds, skip_special_tokens=True)
+        return self.g_tokenizer.batch_decode(pred, skip_special_tokens=True)
 
 
 
@@ -110,7 +111,7 @@ class Trainer(TrainerBase):
         pred = self.generate(uttr)
 
         #Tokenize inputs for discriminator
-        d_encodings = self.tokenize(self.d_tokenizer, preds + resp)
+        d_encodings = self.tokenize(self.d_tokenizer, pred + resp)
         d_ids = d_encodings.input_ids
         d_masks = d_encodings.attention_mask
 
@@ -123,7 +124,7 @@ class Trainer(TrainerBase):
         d_labels = d_labels[d_indice].to(self.device)
 
         with torch.autocast(device_type=self.device_type, dtype=torch.float16):
-            d_outs = d_model(input_ids=d_ids, attention_mask=d_mask, labels=d_labels)
+            d_outs = self.d_model(input_ids=d_ids, attention_mask=d_masks, labels=d_labels)
         
 
         #To be modified
@@ -255,275 +256,3 @@ class Trainer(TrainerBase):
         d_epoch_loss = round(d_epoch_loss / tot_len, 3)
 
         return g_epoch_loss, d_epoch_loss
-
-
-
-
-class GenTrainer(TrainerBase):
-    def __init__(self, config, model, tokenizer, train_dataloader, valid_dataloader):
-        
-        super(GenTrainer, self).__init__(config)
-
-        self.model = model
-        self.tokenizer = tokenizer
-        self.train_dataloader = train_dataloader
-        self.valid_dataloader = valid_dataloader
-
-        self.optimizer = optim.AdamW(self.model.parameters(), lr=config.learning_rate)
-        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, 'min')
-
-        self.ckpt = config.ckpt
-        self.record_path = "ckpt/generator_base.json"
-        self.record_keys = ['epoch', 'train_loss', 'valid_loss', 'lr', 'train_time']
-        
-
-
-    def train(self):
-
-        records = []
-        best_loss = float('inf')
-        patience = self.patience
-
-
-        for epoch in range(1, self.n_epochs + 1):
-            start_time = time.time()
-            record_vals = [epoch, self.train_epoch(), self.valid_epoch(), 
-                           self.optimizer.param_groups[0]['lr'],
-                           self.measure_time(start_time, time.time())]
-            record_dict = {k: v for k, v in zip(self.record_keys, record_vals)}
-            
-            records.append(record_dict)
-            self.print_epoch(record_dict)
-            
-            val_loss = record_dict['valid_loss']
-            self.scheduler.step(val_loss)
-
-            #save best model
-            if best_loss > val_loss:
-                best_loss = val_loss
-                torch.save({'epoch': epoch,
-                            'model_state_dict': self.model.state_dict(),
-                            'optimizer_state_dict': self.optimizer.state_dict()},
-                            self.ckpt)
-                #patience intialize
-                if self.early_stop:
-                    patience = self.patience
-            
-            else:
-                if not self.early_stop:
-                    continue
-                patience -= 1
-                if not patience:
-                    print('\n--- Training Ealry Stopped ---')
-                    break
-
-        #save train_records
-        with open(self.record_path, 'w') as fp:
-            json.dump(records, fp)    
-
-
-    def train_epoch(self):
-        epoch_loss = 0
-        tot_len = len(self.train_dataloader)
-        self.model.trian()
-        
-        for idx, batch in enumerate(self.train_dataloader):
-            idx += 1
-            uttr, resp = batch[0], batch[1]
-            uttr_encodings = self.tokenize('gen', uttr)
-            resp_encodings = self.tokenizer('gen', resp)
-
-            input_ids = uttr_encodings.input_ids.to(self.device)
-            attention_mask = uttr_encodings.attention_mask.to(self.device)
-            labels = resp_encodings.input_ids.to(self.device)
-
-            with torch.autocast(device_type=self.device_type, dtype=torch.float16):
-                loss = self.model(input_ids=input_ids,
-                                  attention_mask=attention_mask,
-                                  labels=labels).loss
-                loss = loss / self.iters_to_accumulate
-
-            #Backward Loss
-            self.scaler.scale(loss).backward()        
-
-            if (idx % self.iters_to_accumulate == 0) or (idx == tot_len):
-                #Gradient Clipping
-                self.scaler.unscale_(self.optimizer)
-                nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.clip)
-                
-                #Gradient Update & Scaler Update
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
-                self.optimizer.zero_grad()                
-
-            epoch_loss += loss    
-
-        epoch_loss = round(epoch_loss / tot_len, 3)
-        return epoch_loss
-
-
-    def valid_epoch(self):
-        epoch_loss = 0
-        self.model.eval()
-
-        for batch in self.valid_dataloader:
-            uttr, resp = batch[0], batch[1]
-            uttr_encodings = self.tokenize('gen', uttr)
-            resp_encodings = self.tokenizer('gen', resp)
-
-            input_ids = uttr_encodings.input_ids.to(self.device)
-            attention_mask = uttr_encodings.attention_mask.to(self.device)
-            labels = resp_encodings.input_ids.to(self.device)
-
-
-            with torch.autocast(device_type=self.device_type, dtype=torch.float16):
-                loss = self.model(input_ids=input_ids, 
-                                  attention_mask=attention_mask,
-                                  labels=labels).loss
-
-            epoch_loss += loss
-
-        epoch_loss = round(epoch_loss / len(self.valid_dataloader), 3)
-        return epoch_loss
-
-
-
-
-class DisTrainer(TrainerBase):
-    def __init__(self, config, g_model, d_model, g_tokenizer, 
-                 d_tokenizer, train_dataloader, valid_dataloader):
-        
-        super(DisTrainer, self).__init__(config)
-
-        self.g_model = g_model
-        self.d_model = d_model
-
-        self.g_tokenizer = g_tokenizer
-        self.d_tokenizer = d_tokenizer
-
-        self.train_dataloader = train_dataloader
-        self.valid_dataloader = valid_dataloader
-
-        self.optimizer = optim.AdamW(params=self.d_model.parameters(), lr=config.lr)
-        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, 'min')
-
-        self.ckpt = config.d_ckpt
-        self.record_path = 'ckpt/discriminator_base.json'
-        self.record_keys = ['epoch', 'train_loss', 'valid_loss', 'lr', 'train_time']
-
-
-
-    def train(self):
-        records = []        
-        best_loss = float('inf')
-        patience = self.patience
-
-        for epoch in range(1, self.n_epochs + 1):
-            start_time = time.time()
-            record_vals = [epoch, self.train_epoch(), self.valid_epoch(), 
-                           self.optimizer.param_groups[0]['lr'],
-                           self.measure_time(start_time, time.time())]
-            record_dict = {k: v for k, v in zip(self.record_keys, record_vals)}
-
-            records.append(record_dict)
-            self.print_epoch(record_dict)
-            
-            val_loss = record_dict['valid_loss']
-            self.scheduler.step(val_loss)
-
-            #save best model
-            if best_loss > val_loss:
-                best_loss = val_loss
-                torch.save({'epoch': epoch,
-                            'model_state_dict': self.model.state_dict(),
-                            'optimizer_state_dict': self.optimizer.state_dict()},
-                            self.ckpt)
-                
-                #patience intialize
-                if self.early_stop:
-                    patience = self.patience
-            
-            else:
-                if not self.early_stop:
-                    continue
-                patience -= 1
-                if not patience:
-                    print('\n--- Training Ealry Stopped ---')
-                    break
-
-        #save train_records
-        with open(self.record_path, 'w') as fp:
-            json.dump(records, fp)    
-
-
-
-    def get_loss(self, batch):
-        uttr, resp = batch[0], batch[1]
-        batch_size = len(uttr)
-
-        #Generate Predictions through Generator Model
-        pred = self.generate(uttr)
-
-        #Tokenize inputs for discriminator
-        d_encodings = self.tokenize(self.d_tokenizer, preds + resp)
-        d_ids = d_encodings.input_ids
-        d_masks = d_encodings.attention_mask
-
-        d_labels = torch.cat((torch.zeros(batch_size), torch.ones(batch_size)), dim=0).to(self.device)
-        d_indice = torch.randperm(batch_size * 2)
-
-        #Shuffle Discriminator inputs
-        d_ids = d_ids[d_indice].to(self.device)
-        d_masks = d_masks[d_indice].to(self.device)
-        d_labels = d_labels[d_indice].to(self.device)
-
-        with torch.autocast(device_type=self.device_type, dtype=torch.float16):
-            loss = d_model(input_ids=d_ids, attention_mask=d_mask, labels=d_labels).loss
-        
-        return loss
-
-
-    def train_epoch(self):
-        epoch_loss = 0
-        tot_len = len(self.train_dataloader)
-
-        d_model.train()
-        g_model.eval()        
-
-        for idx, batch in enumerate(self.train_dataloader):
-            idx += 1
-            loss = self.get_loss(batch)
-            loss = loss / self.iters_to_accumulate
-
-            #Backward Loss
-            self.scaler.scale(loss).backward()        
-
-            if (idx % self.iters_to_accumulate == 0) or (idx == tot_len):
-                #Gradient Clipping
-                self.scaler.unscale_(self.optimizer)
-                nn.utils.clip_grad_norm_(self.d_model.parameters(), max_norm=self.clip)
-                
-                #Gradient Update & Scaler Update
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
-                self.optimizer.zero_grad()                
-
-            epoch_loss += loss    
-
-        epoch_loss = round(epoch_loss / tot_len, 3)
-        return epoch_loss
-    
-
-    def valid_epoch(self):
-        epoch_loss = 0
-
-        d_model.eval()
-        g_model.eval()
-
-        for batch in self.valid_dataloader:
-            loss = self.get_loss(batch)
-            epoch_loss += loss
-
-        epoch_loss = round(epoch_loss / len(self.valid_dataloader), 3)
-
-        return epoch_loss

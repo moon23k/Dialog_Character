@@ -25,6 +25,13 @@ class Tester:
         return f"{elapsed_min}m {elapsed_sec}s"        
 
 
+    def tokenize(self, tokenizer, tokenizer_inputs):
+        return tokenizer(tokenizer_inputs, 
+                         padding=True, 
+                         truncation=True, 
+                         return_tensors='pt').to(self.device)
+
+
     def test(self):
         scores = 0
 
@@ -36,7 +43,7 @@ class Tester:
                 uttr, resp = batch[0], batch[1]
 
                 #tokenize inputs for generator
-                g_uttr_encodings = self.g_tokenizer(uttr, padding=True, truncation=True, return_tensors='pt').to(self.device)
+                g_uttr_encodings = self.tokenizer(self.g_tokenizer, uttr)
                 g_ids = g_uttr_encodings.input_ids
                 g_masks = g_uttr_encodings.attention_mask
 
@@ -49,7 +56,7 @@ class Tester:
                 preds = self.g_tokenizer.batch_decode(preds, skip_special_tokens=True)
 
                 #Tokenize inputs for discriminator
-                d_encodings = self.d_tokenizer(preds, resp, return_tensors='pt').to(self.device)
+                d_encodings = self.tokenize(self.d_tokenizer, preds)
                 d_ids = d_encodings.input_ids
                 d_masks = d_encodings.attention_mask
                 logits = self.d_model(input_ids=d_ids, attention_mask=d_masks)

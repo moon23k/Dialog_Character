@@ -1,7 +1,8 @@
 import os, json, argparse, torch
 from module.data import load_dataloader
 from module.model import load_generator, load_discriminator
-from module.train import GenTrainer, DisTrainer, Trainer
+from module.train import Trainer
+from module.pretrain import GenTrainer, DisTrainer
 from module.test import Tester
 from transformers import (set_seed, 
                           BertTokenizerFast,
@@ -67,22 +68,59 @@ def load_tokenizers(config):
 
 
 
-def pretrain(config, g_model, d_model, g_tokenizer, d_tokenizer):
-    train_dataloader = load_dataloader(config, 'train')
-    valid_dataloader = load_dataloader(config, 'valid')        
+def generate(config, model, tokenizer):
 
-    #PreTrain Generator with Character Dataset
-    g_trainer = GenTrainer(config, g_model, g_tokenizer, train_dataloader, valid_dataloader)
+    model_state = torch.torch.load(config.g_base_ckpt, map_location=config.device)['model_state_dict']
+    model.load_state_dict(model_state)
+
+    dataloader = load_dataloader(config)
+
+    generated = []
+    for batch in dataloader:
+        uttr, resp = batch[0], batch[1]
+        batch_size = len(uttr)
+
+        uttr_encodings = tokenizer(uttr).to(config.device)        
+
+        pred = model.generate(input_ids=uttr_encodings.input_ids,
+                              attention_mask=uttr_encodings.attention_mask,
+                              use_cache=True)
+        pred = tokenizer.batch_decode(pred, skip_special_tokens=True)
+
+        for i in range(batch_size):
+            generated.append({'uttr': uttr[i], 
+                              'resp': resp[i], 
+                              'pred': pred[i]})
+
+
+    with open(f'data/{config.character}.json', 'w') as f:
+        json.dump(f, generated)
+
+
+
+def pretrain(config, g_model, d_model, g_tokenizer, d_tokenizer):
+
+    ###PreTrain Generator with Character Dataset    
+    config.model_type = 'generator'
+    g_train_dataloader = load_dataloader(config, 'train')
+    g_valid_dataloader = load_dataloader(config, 'valid')
+
+    g_trainer = GenTrainer(config, g_model, g_tokenizer, g_train_dataloader, g_valid_dataloader)
     g_trainer.train()
 
-    #Load Pre Trained model states 
-    g_model_state = torch.torch.load(config.g_base_ckpt, map_location=config.device)['model_state_dict']
-    g_model.load_state_dict(g_model_state)
 
-    #PreTrain Discriminator
-    d_trainer = DisTrainer(config, g_model, d_model, g_tokenizer,
-                           d_tokenizer, train_dataloader, valid_dataloader)
+    ###Generate Samples to PreTrain Discriminator
+    generate(config, g_model, g_tokenizer)
+    
+
+    ###PreTrain Discriminator
+    config.model_type = 'discriminator'
+    d_train_dataloader = load_dataloader(config, 'train')
+    d_valid_dataloader = load_dataloader(config, 'valid')        
+
+    d_trainer = DisTrainer(config, d_model, d_tokenizer, d_train_dataloader, d_valid_dataloader)
     d_trainer.train()
+
 
 
 
@@ -149,19 +187,24 @@ def main(args):
     
 
 
+
 if __name__ == '__main__':
+
     parser = argparse.ArgumentParser()
     parser.add_argument('-mode', required=True)
     parser.add_argument('-char', required=True)
+
     
     args = parser.parse_args()
     assert args.mode.lower() in ['pretrain', 'train', 'test', 'inference']
     assert args.char.lower() in ['ted', 'barney', 'marshall', 'lily', 'robin']
 
+
     if args.mode == 'train':
         assert os.path.exists('ckpt/generator_base.pt')
         assert os.path.exists('ckpt/discriminator_base.pt')
-    elif args.mode == 'test':
+    
+    elif args.mode in ['test', 'inference']:
         assert os.path.exists('ckpt/discriminator.pt')
         assert os.path.exists('ckpt/generator.pt')
 

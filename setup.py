@@ -1,6 +1,70 @@
-import os, json, requests, argparse
-from tqdm import tqdm
+import os, re, json, requests, argparse
+from datasets import load_dataset
 from bs4 import BeautifulSoup as bs
+
+
+
+def select_data(orig_data, volumn=12000):
+    volumn_cnt = 0
+    uttr_list, resp_list, processed = [], [], []
+
+    for dial in orig_data:
+        dial_list = []
+        dial_turns = len(dial)
+        
+        for uttr in dial:
+            _uttr = re.sub(r"\s([?,.!’](?:\s|$))", r'\1', uttr)
+            _uttr = re.sub(r'([’])\s+', r'\1', _uttr)
+            dial_list.append(_uttr.strip().lower())
+        
+        if dial_turns < 2:
+            continue
+
+        elif dial_turns == 2:
+            uttr_list.append(dial_list[0])
+            resp_list.append(dial_list[1])
+            continue  #To avoid duplicate on below condition
+
+        #Incase of dial_turns is even
+        elif dial_turns % 2 == 0:
+            uttr_list.extend(dial_list[0::2])
+            resp_list.extend(dial_list[1::2])
+
+            uttr_list.extend(dial_list[1:-1:2])
+            resp_list.extend(dial_list[2::2])
+        
+        #Incase of dial_turns is odds
+        elif dial_turns % 2 == 1:
+            uttr_list.extend(dial_list[0:-1:2])
+            resp_list.extend(dial_list[1::2])
+            
+            uttr_list.extend(dial_list[1::2])
+            resp_list.extend(dial_list[2::2])   
+
+    assert len(uttr_list) == len(resp_list)
+    for uttr, resp in zip(uttr_list, resp_list):
+        temp_dict = dict()
+        temp_dict['uttr'] = uttr
+        temp_dict['resp'] = resp
+        processed.append(temp_dict)
+
+        #End Condition
+        volumn_cnt += 1
+        if volumn_cnt == volumn:
+            break
+    
+    return processed
+
+
+def save_data(data_obj):
+    #split data into train/valid/test sets
+    train, valid, test = data_obj[:-2000], data_obj[-2000:-1000], data_obj[-1000:]
+    data_dict = {k:v for k, v in zip(['train', 'valid', 'test'], [train, valid, test])}
+
+    for key, val in data_dict.items():
+        with open(f'data/{key}.json', 'w') as f:
+            json.dump(val, f)        
+        assert os.path.exists(f'data/{key}.json')
 
 
 
@@ -77,7 +141,7 @@ def split_script(script):
 
 
 
-def split_dialog(script, char='barney'):
+def split_dialog(script, char):
     dialog = []
     prior_char, prior_uttr = '', ''
 
@@ -108,12 +172,19 @@ def split_dialog(script, char='barney'):
 
 
 
+def setup_daily():
+    orig = load_dataset('daily_dialog', split='train')['dialog']
+    selected = select_data(orig)
+    save_data(selected)
 
-def main(character):
+
+
+def setup_himym(character):
+
     data = []
     urls = get_urls()
     
-    for url in tqdm(urls):
+    for url in urls:
         html = requests.get(url)
         soup = bs(html.text, "html.parser")
         orig = soup.select(".content")[0].text.split('\n')
@@ -126,14 +197,21 @@ def main(character):
     with open(f'data/{character}.json', 'w') as f:
         json.dump(data, f)
     assert os.path.exists(f'data/{character}.json')
-    
+
+
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument('-mode', required=True)
     parser.add_argument('-char', required=True)
     
     args = parser.parse_args()
+    assert args.char in ['pretrain', 'train']
     assert args.char in ['ted', 'barney', 'marshall', 'lily', 'robin']
 
-    main(args.char)
+
+    if args.mode == 'train':
+        setup_daily()
+    else:
+        setup_himym(args.char)
