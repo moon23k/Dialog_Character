@@ -34,6 +34,7 @@ class GenTrainer(TrainerBase):
               Generator Valid Loss: {record_dict['valid_loss']:.3f}\n""".replace(' ' * 14, ''))        
 
 
+
     def train(self):
 
         records = []
@@ -79,6 +80,7 @@ class GenTrainer(TrainerBase):
         #save train_records
         with open(self.record_path, 'w') as fp:
             json.dump(records, fp)    
+
 
 
     def train_epoch(self):
@@ -127,10 +129,11 @@ class GenTrainer(TrainerBase):
             uttr_encodings = self.tokenize(self.tokenizer, uttr)
             resp_encodings = self.tokenize(self.tokenizer, resp)
 
-            with torch.autocast(device_type=self.device_type, dtype=torch.float16):
-                loss = self.model(input_ids=uttr_encodings.input_ids, 
-                                  attention_mask=uttr_encodings.attention_mask,
-                                  labels=resp_encodings.input_ids).loss
+            with torch.no_grad():
+                with torch.autocast(device_type=self.device_type, dtype=torch.float16):
+                    loss = self.model(input_ids=uttr_encodings.input_ids, 
+                                      attention_mask=uttr_encodings.attention_mask,
+                                      labels=resp_encodings.input_ids).loss
 
             epoch_loss += loss.item()
 
@@ -169,13 +172,15 @@ class DisTrainer(TrainerBase):
 
 
     def get_loss(self, batch):
-        pos, neg = batch[0], batch[1]
-        batch_size = len(pos)
+        uttr, pos, neg = batch[0], batch[1], batch[2]
+        batch_size = len(uttr)
 
         #Tokenize inputs for discriminator
-        encodings = self.tokenize(self.tokenizer, pos + neg)
-        ids = encodings.input_ids
-        masks = encodings.attention_mask
+        pos_encodings = self.tokenize(self.tokenizer, uttr + pos)
+        neg_encodings = self.tokenize(self.tokenizer, uttr + neg)
+        
+        ids = torch.cat((pos_encodings.input_ids, neg_encodings.input_ids))
+        masks = torch.cat((pos_encodings.attention_mask, neg_encodings.attention_mask))
 
         labels = torch.cat((torch.zeros(batch_size), torch.ones(batch_size)), dim=0).to(self.device)
         indice = torch.randperm(batch_size * 2)
@@ -267,7 +272,8 @@ class DisTrainer(TrainerBase):
 
         self.model.eval()
         for batch in self.valid_dataloader:
-            loss = self.get_loss(batch)
+            with torch.no_grad():
+                loss = self.get_loss(batch)
             epoch_loss += loss.item()
 
         epoch_loss = round(epoch_loss / len(self.valid_dataloader), 3)

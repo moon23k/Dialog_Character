@@ -69,9 +69,10 @@ def load_tokenizers(config):
 
 
 def generate(config, model, tokenizer):
-
+    #Load Pretrained Generator Model States
     model_state = torch.torch.load(config.g_base_ckpt, map_location=config.device)['model_state_dict']
     model.load_state_dict(model_state)
+    model.eval()
 
     dataloader = load_dataloader(config)
 
@@ -81,10 +82,12 @@ def generate(config, model, tokenizer):
         batch_size = len(uttr)
 
         uttr_encodings = tokenizer(uttr).to(config.device)        
+        
+        with torch.no_grad():
+            pred = model.generate(input_ids=uttr_encodings.input_ids,
+                                  attention_mask=uttr_encodings.attention_mask,
+                                  use_cache=True)
 
-        pred = model.generate(input_ids=uttr_encodings.input_ids,
-                              attention_mask=uttr_encodings.attention_mask,
-                              use_cache=True)
         pred = tokenizer.batch_decode(pred, skip_special_tokens=True)
 
         for i in range(batch_size):
@@ -94,7 +97,7 @@ def generate(config, model, tokenizer):
 
 
     with open(f'data/{config.character}.json', 'w') as f:
-        json.dump(f, generated)
+        json.dump(generated, f)
 
 
 
