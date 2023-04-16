@@ -8,10 +8,8 @@ class Dataset(torch.utils.data.Dataset):
         super().__init__()
 
         self.mode = config.mode
-        self.character = None
         
-        if self.mode == 'pretrain':
-            self.model_type = config.model_type
+        if self.mode in ['pretrain', 'generate']:
             self.character = config.character
             self.threshold = config.data_threshold
 
@@ -19,7 +17,7 @@ class Dataset(torch.utils.data.Dataset):
 
 
     def load_data(self, split=None):
-        if self.mode == 'pretrain':
+        if self.mode in ['pretrain', 'generate']:
             f_name = f'data/{self.character}.json'
         else:
             f_name = f"data/{split}.json"    
@@ -40,7 +38,7 @@ class Dataset(torch.utils.data.Dataset):
 
     
     def __getitem__(self, idx):
-        if (self.mode == 'pretrain') and (self.model_type=='discriminator'):
+        if self.mode == 'generate':
             uttr = self.data[idx]['uttr']
             resp = self.data[idx]['resp']
             pred = self.data[idx]['pred']
@@ -55,13 +53,8 @@ class Dataset(torch.utils.data.Dataset):
 
 
 def load_dataloader(config, split=None):
-    
-    #Conditions for Data Shuffling
-    cond1 = config.mode == 'test'
-    cond2 = config.mode == 'pretrain' and config.model_type == 'discriminator'
-
     return DataLoader(Dataset(config, split), 
                       batch_size=config.batch_size, 
-                      shuffle=False if cond1 & cond2 else True,
+                      shuffle=True if 'train' in config.mode else False,
                       num_workers=2,
                       pin_memory=True)

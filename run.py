@@ -59,21 +59,24 @@ class Config(object):
 
 def load_tokenizers(config):
     g_tokenizer = BlenderbotSmallTokenizer.from_pretrained(config.g_mname, model_max_length=config.max_len)
-    
+
     if config.mode == 'inference':
-        return g_tokenizer, None    
-    
-    d_tokenizer = BertTokenizerFast.from_pretrained(config.d_mname, model_max_length=config.max_len)    
+        d_tokenizer = None
+    else:
+        d_tokenizer = BertTokenizerFast.from_pretrained(config.d_mname, model_max_length=config.max_len)
+
     return g_tokenizer, d_tokenizer
 
 
 
 def generate(config, model, tokenizer):
+    
     #Load Pretrained Generator Model States
     model_state = torch.torch.load(config.g_base_ckpt, map_location=config.device)['model_state_dict']
     model.load_state_dict(model_state)
     model.eval()
 
+    config.mode = 'generate'
     dataloader = load_dataloader(config)
 
     generated = []
@@ -95,7 +98,7 @@ def generate(config, model, tokenizer):
                               'resp': resp[i], 
                               'pred': pred[i]})
 
-
+    config.mode = 'pretrain'
     with open(f'data/{config.character}.json', 'w') as f:
         json.dump(generated, f)
 
@@ -104,7 +107,6 @@ def generate(config, model, tokenizer):
 def pretrain(config, g_model, d_model, g_tokenizer, d_tokenizer):
 
     ###PreTrain Generator with Character Dataset    
-    config.model_type = 'generator'
     g_train_dataloader = load_dataloader(config, 'train')
     g_valid_dataloader = load_dataloader(config, 'valid')
 

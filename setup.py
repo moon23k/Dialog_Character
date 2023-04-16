@@ -204,14 +204,14 @@ def setup_himym(character):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-mode', required=True)
-    parser.add_argument('-char', required=True)
+    parser.add_argument('-char', required=False)
     
     args = parser.parse_args()
-    assert args.char in ['pretrain', 'train']
-    assert args.char in ['ted', 'barney', 'marshall', 'lily', 'robin']
+    assert args.mode in ['all', 'pretrain', 'train']
 
-
-    if args.mode == 'train':
+    if args.mode != 'pretrain':
         setup_daily()
-    else:
+    elif args.mode != 'train':
+        assert args.char in ['ted', 'barney', 'marshall', 'lily', 'robin']
         setup_himym(args.char)
+        
