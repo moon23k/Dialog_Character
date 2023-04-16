@@ -170,32 +170,10 @@ class DisTrainer(TrainerBase):
               Discriminator Valid Loss: {record_dict['valid_loss']:.3f}\n""".replace(' ' * 14, ''))        
 
 
-    def get_loss(self, batch):
-        uttr, pos, neg = batch[0], batch[1], batch[2]
-        batch_size = len(uttr)
-
-        #Tokenize inputs for discriminator
-        pos_encodings = self.tokenize(self.tokenizer, uttr + pos)
-        neg_encodings = self.tokenize(self.tokenizer, uttr + neg)
-        
-        ids = torch.cat((pos_encodings.input_ids, neg_encodings.input_ids))
-        masks = torch.cat((pos_encodings.attention_mask, neg_encodings.attention_mask))
-
-        labels = torch.cat((torch.zeros(batch_size), torch.ones(batch_size)), dim=0).to(self.device)
-        indice = torch.randperm(batch_size * 2)
-
-        #Shuffle Discriminator inputs
-        ids = ids[indice].to(self.device)
-        masks = masks[indice].to(self.device)
-        labels = labels[indice].to(self.device)
-
-        with torch.autocast(device_type=self.device_type, dtype=torch.float16):
-            return self.model(input_ids=ids, attention_mask=masks, labels=labels).loss
-
 
     def train(self):
         records = []        
-        best_loss = float('inf')
+        prev_loss, best_loss = float('inf'), float('inf')
         patience = self.patience
 
         for epoch in range(1, self.n_epochs + 1):
@@ -219,21 +197,23 @@ class DisTrainer(TrainerBase):
                             'optimizer_state_dict': self.optimizer.state_dict()},
                             self.ckpt)
                 
-                #patience intialize
-                if self.early_stop:
+            #Early Stopping Process
+            if self.early_stop:
+                if prev_loss > val_loss:
                     patience = self.patience
             
-            else:
-                if not self.early_stop:
-                    continue
-                patience -= 1
-                if not patience:
-                    print('--- Training Ealry Stopped ---\n')
-                    break
+                else:
+                    patience -= 1
+                    if not patience:
+                        print('--- Training Ealry Stopped ---\n')
+                        break
+
+                prev_loss = val_loss
 
         #save train_records
         with open(self.record_path, 'w') as fp:
             json.dump(records, fp)    
+
 
 
     def train_epoch(self):
@@ -242,9 +222,13 @@ class DisTrainer(TrainerBase):
 
         self.model.train()
         for idx, batch in enumerate(self.train_dataloader):
+            
             idx += 1
+            uttr, pos, neg = batch[0], batch[1], batch[2]
+            ids, masks, labels = self.collate_dis_inputs(uttr, pos, neg)
 
-            loss = self.get_loss(batch)
+            with torch.autocast(device_type=self.device_type, dtype=torch.float16):
+                loss = self.model(input_ids=ids, attention_mask=masks, labels=labels).loss            
             loss = loss / self.iters_to_accumulate
 
             #Backward Loss
@@ -253,7 +237,7 @@ class DisTrainer(TrainerBase):
             if (idx % self.iters_to_accumulate == 0) or (idx == tot_len):
                 #Gradient Clipping
                 self.scaler.unscale_(self.optimizer)
-                nn.utils.clip_grad_norm_(self.d_model.parameters(), max_norm=self.clip)
+                nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.clip)
                 
                 #Gradient Update & Scaler Update
                 self.scaler.step(self.optimizer)
@@ -266,15 +250,16 @@ class DisTrainer(TrainerBase):
         return epoch_loss
     
 
+
     def valid_epoch(self):
         epoch_loss = 0
 
         self.model.eval()
         for batch in self.valid_dataloader:
+            ids, masks, labels = self.collate_batch(batch)
             with torch.no_grad():
-                loss = self.get_loss(batch)
+                loss = self.model(input_ids=ids, attention_mask=masks, labels=labels).loss
             epoch_loss += loss.item()
 
         epoch_loss = round(epoch_loss / len(self.valid_dataloader), 3)
-
         return epoch_loss

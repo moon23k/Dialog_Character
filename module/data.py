@@ -8,6 +8,7 @@ class Dataset(torch.utils.data.Dataset):
         super().__init__()
 
         self.mode = config.mode
+        self.model_type = config.model_type
         
         if self.mode in ['pretrain', 'generate']:
             self.character = config.character

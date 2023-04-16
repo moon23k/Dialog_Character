@@ -16,6 +16,7 @@ class Config(object):
 
         self.mode = args.mode
         self.character = args.char
+        self.model_type = None
         
         self.g_mname = "facebook/blenderbot_small-90M"
         self.d_mname = "prajjwal1/bert-small"        
@@ -198,12 +199,13 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-mode', required=True)
-    parser.add_argument('-char', required=True)
+    parser.add_argument('-char', default=None, required=False)
 
     
     args = parser.parse_args()
     assert args.mode.lower() in ['pretrain', 'train', 'test', 'inference']
-    assert args.char.lower() in ['ted', 'barney', 'marshall', 'lily', 'robin']
+        if args.mode == 'pretrain':
+            assert args.char.lower() in ['ted', 'barney', 'marshall', 'lily', 'robin']
 
 
     if args.mode == 'train':

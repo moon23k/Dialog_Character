@@ -1,6 +1,5 @@
 import os, torch
 import torch.nn as nn
-import torch.nn.functional as F
 from collections import namedtuple
 from transformers import (BertModel, BertConfig,
                           BlenderbotSmallConfig,
@@ -20,7 +19,7 @@ class Discriminator(nn.Module):
             bert_config = BertConfig.from_pretrained(config.d_mname)
             self.encoder = BertModel(bert_config).to(self.device)
 
-        self.classifier = nn.Linear(self.encoder.config.hidden_size, 1)
+        self.classifier = nn.Linear(self.encoder.config.hidden_size, 2)
         self.dropout = nn.Dropout(self.encoder.config.hidden_dropout_prob)
         
         self.device = config.device
@@ -61,7 +60,6 @@ def print_model_desc(model):
 
 
 
-
 def load_generator(config):
     if config.mode == 'pretrain':
         generator = BlenderbotSmallForConditionalGeneration.from_pretrained(config.g_mname)
@@ -73,7 +71,11 @@ def load_generator(config):
     generator = BlenderbotSmallForConditionalGeneration(generator_config)
     print(f"Generator for {config.mode.upper()} has loaded")
 
-    ckpt = config.g_ckpt
+    if config.mode == 'train':
+        ckpt = config.g_base_ckpt
+    else:
+        ckpt = config.g_ckpt
+    
     assert os.path.exists(ckpt)
     generator_state = torch.torch.load(ckpt, map_location=config.device)['model_state_dict']
     generator.load_state_dict(generator_state)
@@ -87,20 +89,22 @@ def load_generator(config):
 
 
 def load_discriminator(config):
-    discriminator = Discriminator(config)
-    print(f"Discriminator for {config.mode.upper()} has loaded")
+    if config.mode == 'pretrain':
+        discriminator = Discriminator(config)
+        print(f"Discriminator for {config.mode.upper()} has loaded")
+        print_model_desc(discriminator)
+        return discriminator.to(config.device)
 
     if config.mode == 'train':
-        assert os.path.exists(config.d_base_ckpt)
-        model_state = torch.load(config.d_base_ckpt, map_location=config.device)['model_state_dict']        
-        discriminator.load_state_dict(model_state)
-        print(f"Model States has loaded from {config.d_ckpt}")        
-
-    elif config.mode in ['test', 'inference']:
-        assert os.path.exists(config.d_ckpt)
-        model_state = torch.load(config.d_ckpt, map_location=config.device)['model_state_dict']        
-        discriminator.load_state_dict(model_state)
-        print(f"Model States has loaded from {config.d_ckpt}")
-
+        ckpt = config.g_base_ckpt
+    else:
+        ckpt = config.g_ckpt
+    
+    assert os.path.exists(ckpt)
+    
+    model_state = torch.load(config.d_base_ckpt, map_location=config.device)['model_state_dict']        
+    discriminator.load_state_dict(model_state)
+    print(f"Model States has loaded from {ckpt}")        
     print_model_desc(discriminator)
+
     return discriminator.to(config.device)

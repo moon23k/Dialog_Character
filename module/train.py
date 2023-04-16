@@ -38,7 +38,6 @@ class TrainerBase:
                          return_tensors='pt').to(self.device)
 
 
-
     def generate(self, uttr):        
         g_encodings = self.tokenize(self.g_tokenizer, uttr)
 
@@ -50,6 +49,42 @@ class TrainerBase:
 
         return self.g_tokenizer.batch_decode(pred, skip_special_tokens=True)
 
+
+    def collate_dis_inputs(self, uttr, pos, neg):
+        pos_encodings = self.tokenize(self.tokenizer, uttr + pos)
+        neg_encodings = self.tokenize(self.tokenizer, uttr + neg)
+
+        pos_ids, pos_mask = pos_encodings.input_ids, pos_encodings.attention_mask
+        neg_ids, neg_mask = neg_encodings.input_ids, neg_encodings.attention_mask
+
+        batch_size, pos_len = pos_ids.shape
+        neg_len = neg_ids.size(1)
+        pad_len = neg_len - pos_len
+
+        #Padding
+        if pad_len > 0:
+            pad_tensor = torch.zeros((batch_size, pad_len), dtype=torch.long).to(self.device)
+            pos_ids = torch.cat((pos_ids, pad_tensor), dim=1)
+            pos_mask = torch.cat((pos_mask, pad_tensor), dim=1)
+
+        else:
+            pad_tensor = torch.zeros((batch_size, -pad_len), dtype=torch.long).to(self.device)
+            neg_ids = torch.cat((neg_ids, pad_tensor), dim=1)
+            neg_mask = torch.cat((neg_mask, pad_tensor), dim=1)
+
+
+        ids = torch.cat((pos_ids, neg_ids), dim=0).to(self.device)
+        masks = torch.cat((pos_mask, neg_mask), dim=0).to(self.device)
+
+        labels = torch.cat((torch.zeros(batch_size), torch.ones(batch_size)), dim=0)
+        indice = torch.randperm(batch_size * 2).long()
+
+        #Shuffle Discriminator inputs
+        ids = ids[indice].to(self.device)
+        masks = masks[indice].to(self.device)
+        labels = labels[indice].to(self.device)
+
+        return ids, masks, labels
 
 
     def save_ckpt(self, epoch, ckpt, model, optimizer):
@@ -103,42 +138,43 @@ class Trainer(TrainerBase):
 
 
 
+    def discriminate(self, uttr, neg, pos=None):
+        if resp is not None:
+            encodings = self.tokenize(self.d_tokenizer, uttr + neg)
+            ids = encodings.input_ids
+            masks = encodings.attention_mask
+            labels = torch.zeros(ids.size(0)).to(self.device)
+        else:
+            ids, masks, labels = self.collate_dis_inputs(uttr, neg, pos)
+
+        with torch.autocast(device_type=self.device_type, dtype=torch.float16):
+            outs = self.d_model(input_ids=ids, attention_mask=masks, labels=labels)        
+
+        return outs
+
+
     def get_losses(self, batch):
         uttr, resp = batch[0], batch[1]
         batch_size = len(uttr)
-
-        #Generate Predictions through Generator Model
         pred = self.generate(uttr)
 
-        #Tokenize inputs for discriminator
-        d_encodings = self.tokenize(self.d_tokenizer, pred + resp)
-        d_ids = d_encodings.input_ids
-        d_masks = d_encodings.attention_mask
+        #Get Generator Loss
+        g_logits = self.discriminate(uttr, pred).logits
+        g_logits = F.softmax(g_logits)
+        g_logits = g_logits[g_logits > 0.5].sum() / batch_size
+        g_loss = -torch.log(g_logits)
 
-        d_labels = torch.cat((torch.zeros(batch_size), torch.ones(batch_size)), dim=0).to(self.device)
-        d_indice = torch.randperm(batch_size * 2)
+        #Get Discriminator Loss
+        d_loss = self.discriminate(uttr, resp, pred).loss
 
-        #Shuffle Discriminator inputs
-        d_ids = d_ids[d_indice].to(self.device)
-        d_masks = d_masks[d_indice].to(self.device)
-        d_labels = d_labels[d_indice].to(self.device)
-
-        with torch.autocast(device_type=self.device_type, dtype=torch.float16):
-            d_outs = self.d_model(input_ids=d_ids, attention_mask=d_masks, labels=d_labels)
-        
-
-        #To be modified
-        pos = d_outs.logit[d_labels == 1] > 0.5
-        g_loss = -torch.log(pos.sum() / batch_size)
-
-        return g_loss, d_outs.loss
+        return g_loss, d_loss
 
 
 
     def train(self):
         records = []
         patience = self.patience
-        g_best_loss, d_best_loss  = float('inf'), float('inf')
+        prev_loss, g_best_loss, d_best_loss = float('inf'), float('inf'), float('inf')
 
         for epoch in range(1, self.n_epochs + 1):
             start_time = time.time()
@@ -171,17 +207,18 @@ class Trainer(TrainerBase):
                 g_best_loss = g_curr_loss
                 self.save_ckpt(epoch, self.g_ckpt, self.g_model, self.g_optimizer)
 
-                #patience intialize
-                if self.early_stop:
+            #Early Stopping Process
+            if self.early_stop:
+                if prev_loss > g_curr_loss:
                     patience = self.patience
             
-            else:
-                if not self.early_stop:
-                    continue
-                patience -= 1
-                if not patience:
-                    print('--- Training Ealry Stopped ---\n')
-                    break
+                else:
+                    patience -= 1
+                    if not patience:
+                        print('--- Training Ealry Stopped ---\n')
+                        break
+
+                prev_loss = g_curr_loss
 
 
         #save train_records
