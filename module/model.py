@@ -69,7 +69,7 @@ def load_generator(config):
         print_model_desc(generator)
         return generator.to(config.device)
 
-    generator_config = BlenderbotSmallConfig()
+    generator_config = BlenderbotSmallConfig.from_pretrained(config.g_mname)
     generator = BlenderbotSmallForConditionalGeneration(generator_config)
     print(f"Generator for {config.mode.upper()} has loaded")
 

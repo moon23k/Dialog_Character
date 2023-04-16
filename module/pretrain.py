@@ -2,7 +2,6 @@ import time, json, torch
 import torch.nn as nn
 import torch.amp as amp
 import torch.optim as optim
-from tqdm import tqdm
 from module.train import TrainerBase
 
 
@@ -71,7 +70,7 @@ class GenTrainer(TrainerBase):
                 else:
                     patience -= 1
                     if not patience:
-                        print('\n--- Training Ealry Stopped ---')
+                        print('--- Training Ealry Stopped ---\n')
                         break
 
                 prev_loss = val_loss
@@ -229,7 +228,7 @@ class DisTrainer(TrainerBase):
                     continue
                 patience -= 1
                 if not patience:
-                    print('\n--- Training Ealry Stopped ---')
+                    print('--- Training Ealry Stopped ---\n')
                     break
 
         #save train_records

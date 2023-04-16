@@ -211,7 +211,7 @@ if __name__ == '__main__':
 
     if args.mode != 'pretrain':
         setup_daily()
-    elif args.mode != 'train':
+    if args.mode != 'train':
         assert args.char in ['ted', 'barney', 'marshall', 'lily', 'robin']
         setup_himym(args.char)
         

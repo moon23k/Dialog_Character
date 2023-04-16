@@ -13,7 +13,7 @@ class Dataset(torch.utils.data.Dataset):
             self.character = config.character
             self.threshold = config.data_threshold
 
-        self.data = self.load_data(split, split)
+        self.data = self.load_data(split)
 
 
     def load_data(self, split=None):
@@ -38,7 +38,7 @@ class Dataset(torch.utils.data.Dataset):
 
     
     def __getitem__(self, idx):
-        if self.mode == 'generate':
+        if self.mode == 'pretrain' and self.model_type == 'discriminator':
             uttr = self.data[idx]['uttr']
             resp = self.data[idx]['resp']
             pred = self.data[idx]['pred']

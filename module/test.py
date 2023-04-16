@@ -60,7 +60,7 @@ class Tester:
                 d_ids = d_encodings.input_ids
                 d_masks = d_encodings.attention_mask
                 logits = self.d_model(input_ids=d_ids, attention_mask=d_masks)
-                scores += logits[logits > 0.5]
+                scores += logits[logits > 0.5].sum()
 
         scores = scores / len(dataloader)
 

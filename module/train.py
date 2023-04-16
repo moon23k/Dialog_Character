@@ -180,7 +180,7 @@ class Trainer(TrainerBase):
                     continue
                 patience -= 1
                 if not patience:
-                    print('\n--- Training Ealry Stopped ---')
+                    print('--- Training Ealry Stopped ---\n')
                     break
 
 

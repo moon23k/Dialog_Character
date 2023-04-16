@@ -4,6 +4,7 @@ from module.model import load_generator, load_discriminator
 from module.train import Trainer
 from module.pretrain import GenTrainer, DisTrainer
 from module.test import Tester
+from tqdm import tqdm
 from transformers import (set_seed, 
                           BertTokenizerFast,
                           BlenderbotSmallTokenizer)
@@ -70,7 +71,7 @@ def load_tokenizers(config):
 
 
 def generate(config, model, tokenizer):
-    
+
     #Load Pretrained Generator Model States
     model_state = torch.torch.load(config.g_base_ckpt, map_location=config.device)['model_state_dict']
     model.load_state_dict(model_state)
@@ -80,11 +81,12 @@ def generate(config, model, tokenizer):
     dataloader = load_dataloader(config)
 
     generated = []
-    for batch in dataloader:
+    for batch in tqdm(dataloader):
         uttr, resp = batch[0], batch[1]
         batch_size = len(uttr)
 
-        uttr_encodings = tokenizer(uttr).to(config.device)        
+        uttr_encodings = tokenizer(uttr, padding=True, truncation=True, 
+                                   return_tensors='pt').to(config.device)        
         
         with torch.no_grad():
             pred = model.generate(input_ids=uttr_encodings.input_ids,
@@ -141,8 +143,7 @@ def train(config, g_model, d_model, g_tokenizer, d_tokenizer):
 
 def test(config, g_model, d_model, g_tokenizer, d_tokenizer):
     test_dataloader = load_dataloader(config, 'test')
-    tester = Tester(config, g_model, d_model, 
-                    g_tokenizer, d_tokenizer, test_dataloader)    
+    tester = Tester(config, g_model, d_model, g_tokenizer, d_tokenizer, test_dataloader)    
     tester.test()    
 
 
