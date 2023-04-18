@@ -4,7 +4,7 @@ from bs4 import BeautifulSoup as bs
 
 
 
-def select_data(orig_data, volumn=12000):
+def select_data(orig_data, volumn=1200):
     volumn_cnt = 0
     uttr_list, resp_list, processed = [], [], []
 

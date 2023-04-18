@@ -204,8 +204,8 @@ if __name__ == '__main__':
     
     args = parser.parse_args()
     assert args.mode.lower() in ['pretrain', 'train', 'test', 'inference']
-        if args.mode == 'pretrain':
-            assert args.char.lower() in ['ted', 'barney', 'marshall', 'lily', 'robin']
+    if args.mode == 'pretrain':
+        assert args.char.lower() in ['ted', 'barney', 'marshall', 'lily', 'robin']
 
 
     if args.mode == 'train':

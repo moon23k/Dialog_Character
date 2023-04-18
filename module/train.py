@@ -1,8 +1,8 @@
 import time, json, torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.amp as amp
 import torch.optim as optim
-from tqdm import tqdm
 
 
 
@@ -50,9 +50,14 @@ class TrainerBase:
         return self.g_tokenizer.batch_decode(pred, skip_special_tokens=True)
 
 
-    def collate_dis_inputs(self, uttr, pos, neg):
-        pos_encodings = self.tokenize(self.tokenizer, uttr + pos)
-        neg_encodings = self.tokenize(self.tokenizer, uttr + neg)
+    def collate_dis_inputs(self, uttr, resp, pred):
+        if isinstance(self, Trainer):
+            tokenizer = self.d_tokenizer
+        else:
+            tokenizer = self.tokenizer
+
+        pos_encodings = self.tokenize(tokenizer, uttr + resp)
+        neg_encodings = self.tokenize(tokenizer, uttr + pred)
 
         pos_ids, pos_mask = pos_encodings.input_ids, pos_encodings.attention_mask
         neg_ids, neg_mask = neg_encodings.input_ids, neg_encodings.attention_mask
@@ -128,24 +133,24 @@ class Trainer(TrainerBase):
 
     def print_epoch(self, record_dict):
         print(f"""Epoch {record_dict['epoch']}/{self.n_epochs} | \
-              Time: {record_dict['train_time']}""".replace(' ' * 14, ''))
+              Time: {record_dict['epoch_time']}""".replace(' ' * 14, ''))
 
-        print(f"""  >> Generator Train Loss: {record_dict['g_train_loss']:.3f} | \
-              Generator Valid Loss: {record_dict['g_valid_loss']:.3f}\n""".replace(' ' * 14, ''))
+        print(f"""  >> Generator Train Loss: {record_dict['g_train_loss']:.3f}     | \
+              Generator Valid Loss: {record_dict['g_valid_loss']:.3f}""".replace(' ' * 14, ''))
 
         print(f"""  >> Discriminator Train Loss: {record_dict['d_train_loss']:.3f} | \
               Discriminator Valid Loss: {record_dict['d_valid_loss']:.3f}\n""".replace(' ' * 14, ''))
 
 
 
-    def discriminate(self, uttr, neg, pos=None):
-        if resp is not None:
-            encodings = self.tokenize(self.d_tokenizer, uttr + neg)
+    def discriminate(self, uttr, resp=None, pred=None):
+        if resp is None:
+            encodings = self.tokenize(self.d_tokenizer, uttr + pred)
             ids = encodings.input_ids
             masks = encodings.attention_mask
             labels = torch.zeros(ids.size(0)).to(self.device)
         else:
-            ids, masks, labels = self.collate_dis_inputs(uttr, neg, pos)
+            ids, masks, labels = self.collate_dis_inputs(uttr, resp, pred)
 
         with torch.autocast(device_type=self.device_type, dtype=torch.float16):
             outs = self.d_model(input_ids=ids, attention_mask=masks, labels=labels)        
@@ -159,10 +164,14 @@ class Trainer(TrainerBase):
         pred = self.generate(uttr)
 
         #Get Generator Loss
-        g_logits = self.discriminate(uttr, pred).logits
-        g_logits = F.softmax(g_logits)
-        g_logits = g_logits[g_logits > 0.5].sum() / batch_size
-        g_loss = -torch.log(g_logits)
+        g_logit = self.discriminate(uttr, None, pred).logit
+        g_logit = F.softmax(g_logit, dim=-1)
+        g_logit = g_logit[g_logit > 0.5].sum().item() / batch_size
+        
+        if not g_logit:
+            g_logit = 1e-4
+
+        g_loss = -torch.log(torch.tensor(g_logit, requires_grad=True)).to(self.device)
 
         #Get Discriminator Loss
         d_loss = self.discriminate(uttr, resp, pred).loss
@@ -189,8 +198,8 @@ class Trainer(TrainerBase):
             records.append(record_dict)
             self.print_epoch(record_dict)
             
-            g_curr_loss = record_dict['gen_valid_loss']
-            d_curr_loss = record_dict['dis_valid_loss']
+            g_curr_loss = record_dict['g_valid_loss']
+            d_curr_loss = record_dict['d_valid_loss']
 
             self.g_scheduler.step(g_curr_loss)
             self.d_scheduler.step(d_curr_loss)
@@ -239,33 +248,30 @@ class Trainer(TrainerBase):
             
             idx += 1
             g_loss, d_loss = self.get_losses(batch)
-            
-            g_loss = g_loss / self.iters_to_accumulate
-            d_loss = d_loss / self.iters_to_accumulate
+            g_loss /= self.iters_to_accumulate
+            d_loss /= self.iters_to_accumulate
 
-            self.scaler.scale(g_loss).backward()
+            g_loss.backward()
             self.scaler.scale(d_loss).backward()
-            
 
-            if (idx % self.iters_to_accumulate == 0) or (idx == tot_len):    
+            if (idx % self.iters_to_accumulate == 0) or (idx == tot_len):
+                self.scaler.unscale_(self.d_optimizer)
+
                 #Gradient Clipping
-                self.scaler.unscale_(self.gen_optimizer)
-                self.scaler.unscale_(self.dis_optimizer)
-
-                nn.utils.clip_grad_norm_(self.generator.parameters(), max_norm=self.clip)
-                nn.utils.clip_grad_norm_(self.discriminator.parameters(), max_norm=self.clip)
+                nn.utils.clip_grad_norm_(self.g_model.parameters(), max_norm=self.clip)
+                nn.utils.clip_grad_norm_(self.d_model.parameters(), max_norm=self.clip)
                 
                 #Gradient Update & Scaler Update
-                self.scaler.step(self.gen_optimizer)
-                self.scaler.step(self.dis_optimizer)
+                self.g_optimizer.step()
+                self.scaler.step(self.d_optimizer)
                 
                 self.scaler.update()
                 
-                self.gen_optimizer.zero_grad()
-                self.dis_optimizer.zero_grad()
+                self.g_optimizer.zero_grad()
+                self.d_optimizer.zero_grad()
 
-            gen_epoch_loss += g_loss.item()
-            dis_epoch_loss += d_loss.item()
+            g_epoch_loss += g_loss.item()
+            d_epoch_loss += d_loss.item()
         
         g_epoch_loss = round(g_epoch_loss / tot_len, 3)
         d_epoch_loss = round(d_epoch_loss / tot_len, 3)
@@ -282,9 +288,8 @@ class Trainer(TrainerBase):
         self.d_model.eval()
         
         with torch.no_grad():
-            for batch in self.valid_dataloader:   
-                self.update_inputs(batch)       
-                g_loss, d_loss = self.get_losses()
+            for batch in self.valid_dataloader:          
+                g_loss, d_loss = self.get_losses(batch)
 
                 g_epoch_loss += g_loss.item()
                 d_epoch_loss += d_loss.item()

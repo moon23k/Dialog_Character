@@ -19,7 +19,7 @@ class Discriminator(nn.Module):
             bert_config = BertConfig.from_pretrained(config.d_mname)
             self.encoder = BertModel(bert_config).to(self.device)
 
-        self.classifier = nn.Linear(self.encoder.config.hidden_size, 2)
+        self.classifier = nn.Linear(self.encoder.config.hidden_size, 1)
         self.dropout = nn.Dropout(self.encoder.config.hidden_dropout_prob)
         
         self.device = config.device
@@ -89,9 +89,11 @@ def load_generator(config):
 
 
 def load_discriminator(config):
+
+    discriminator = Discriminator(config)
+    print(f"Discriminator for {config.mode.upper()} has loaded")
+    
     if config.mode == 'pretrain':
-        discriminator = Discriminator(config)
-        print(f"Discriminator for {config.mode.upper()} has loaded")
         print_model_desc(discriminator)
         return discriminator.to(config.device)
 
