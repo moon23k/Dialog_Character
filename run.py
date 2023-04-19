@@ -163,7 +163,7 @@ def inference(g_model, g_tokenizer):
             break        
 
         #convert user input_seq into model input_ids
-        input_ids = g_tokenizer(input_seq)['input_ids']
+        input_ids = g_tokenizer(input_seq, return_tensors='pt')['input_ids']
         output_ids = g_model.generate(input_ids, max_new_tokens=128, use_cache=True)
         output_seq = g_tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0]
 

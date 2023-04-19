@@ -126,8 +126,8 @@ class Trainer(TrainerBase):
         self.d_ckpt = config.d_ckpt
 
         self.record_path = 'ckpt/train.json'
-        self.record_keys = ['epoch', 'g_train_loss', 'g_valid_loss',
-                            'd_train_loss', 'd_valid_loss', 'g_lr', 'd_lr', 'epoch_time']
+        self.record_keys = ['epoch', 'g_train_loss', 'd_train_loss', 
+                            'g_valid_loss', 'd_valid_loss', 'g_lr', 'd_lr', 'epoch_time']
 
 
 
