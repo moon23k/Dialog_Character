@@ -1,9 +1,13 @@
 import os, torch
 import torch.nn as nn
 from collections import namedtuple
-from transformers import (BertModel, BertConfig,
-                          BlenderbotSmallConfig,
-                          BlenderbotSmallForConditionalGeneration)
+
+from transformers import (
+    BertModel, 
+    BertConfig,
+    BlenderbotSmallConfig,
+    BlenderbotSmallForConditionalGeneration
+)
 
 
 

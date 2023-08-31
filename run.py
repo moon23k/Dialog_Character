@@ -1,13 +1,22 @@
 import os, json, argparse, torch
-from module.data import load_dataloader
-from module.model import load_generator, load_discriminator
+
 from module.train import Trainer
 from module.pretrain import GenTrainer, DisTrainer
-from module.test import Tester
-from tqdm import tqdm
-from transformers import (set_seed, 
-                          BertTokenizerFast,
-                          BlenderbotSmallTokenizer)
+
+from module import (
+    load_dataloader,
+    load_generator,
+    load_discriminator,
+    Tester,
+    Search
+)
+
+
+from transformers import (
+    set_seed, 
+    BertTokenizerFast,
+    BlenderbotSmallTokenizer
+)
 
 
 
@@ -60,12 +69,16 @@ class Config(object):
 
 
 def load_tokenizers(config):
-    g_tokenizer = BlenderbotSmallTokenizer.from_pretrained(config.g_mname, model_max_length=config.max_len)
+    g_tokenizer = BlenderbotSmallTokenizer.from_pretrained(
+        config.g_mname, model_max_length=config.max_len
+    )
 
     if config.mode == 'inference':
         d_tokenizer = None
     else:
-        d_tokenizer = BertTokenizerFast.from_pretrained(config.d_mname, model_max_length=config.max_len)
+        d_tokenizer = BertTokenizerFast.from_pretrained(
+            config.d_mname, model_max_length=config.max_len
+        )
 
     return g_tokenizer, d_tokenizer
 
@@ -74,7 +87,11 @@ def load_tokenizers(config):
 def generate(config, model, tokenizer):
 
     #Load Pretrained Generator Model States
-    model_state = torch.torch.load(config.g_base_ckpt, map_location=config.device)['model_state_dict']
+    model_state = torch.torch.load(
+        config.g_base_ckpt, 
+        map_location=config.device
+    )['model_state_dict']
+    
     model.load_state_dict(model_state)
     model.eval()
 
@@ -86,13 +103,19 @@ def generate(config, model, tokenizer):
         uttr, resp = batch[0], batch[1]
         batch_size = len(uttr)
 
-        uttr_encodings = tokenizer(uttr, padding=True, truncation=True, 
-                                   return_tensors='pt').to(config.device)        
+        uttr_encodings = tokenizer(
+            uttr, 
+            padding=True, 
+            truncation=True, 
+            return_tensors='pt'
+        ).to(config.device)        
         
         with torch.no_grad():
-            pred = model.generate(input_ids=uttr_encodings.input_ids,
-                                  attention_mask=uttr_encodings.attention_mask,
-                                  use_cache=True)
+            pred = model.generate(
+                input_ids=uttr_encodings.input_ids,
+                attention_mask=uttr_encodings.attention_mask,
+                use_cache=True
+            )
 
         pred = tokenizer.batch_decode(pred, skip_special_tokens=True)
 
