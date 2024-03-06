@@ -4,7 +4,7 @@ from torch.utils.data import DataLoader
 
 
 class Dataset(torch.utils.data.Dataset):
-    def __init__(self, config, split=None):
+    def __init__(self, config, split):
         super().__init__()
 
         self.mode = config.mode
@@ -17,7 +17,7 @@ class Dataset(torch.utils.data.Dataset):
         self.data = self.load_data(split)
 
 
-    def load_data(self, split=None):
+    def load_data(self):
         if self.mode in ['pretrain', 'generate']:
             f_name = f'data/{self.character}.json'
         else:
@@ -25,11 +25,6 @@ class Dataset(torch.utils.data.Dataset):
 
         with open(f_name, 'r') as f:
             data = json.load(f)
-
-        if self.mode == 'pretrain' and split == 'train':
-            data = data[:self.threshold]
-        elif self.mode == 'pretrain' and split == 'valid':
-            data = data[self.threshold:]
 
         return data
 
@@ -39,7 +34,7 @@ class Dataset(torch.utils.data.Dataset):
 
     
     def __getitem__(self, idx):
-        if self.mode == 'pretrain' and self.model_type == 'discriminator':
+        if self.mode == 'pretrain':
             uttr = self.data[idx]['uttr']
             resp = self.data[idx]['resp']
             pred = self.data[idx]['pred']
@@ -53,11 +48,11 @@ class Dataset(torch.utils.data.Dataset):
 
 
 
-def load_dataloader(config, split=None):
+def load_dataloader(config, split):
     return DataLoader(
         Dataset(config, split), 
         batch_size=config.batch_size, 
-        shuffle=True if 'train' in config.mode else False,
+        shuffle='train' in config.mode,
         num_workers=2,
         pin_memory=True
     )

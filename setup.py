@@ -4,9 +4,11 @@ from bs4 import BeautifulSoup as bs
 
 
 
-def select_data(orig_data, volumn=1200):
+
+def process_dialogue_data(volumn=1200):
     volumn_cnt = 0
     uttr_list, resp_list, processed = [], [], []
+    orig_data = load_dataset('daily_dialog', split='train')['dialog']
 
     for dial in orig_data:
         dial_list = []
@@ -14,8 +16,12 @@ def select_data(orig_data, volumn=1200):
         
         for uttr in dial:
             _uttr = re.sub(r"\s([?,.!’](?:\s|$))", r'\1', uttr)
-            _uttr = re.sub(r'([’])\s+', r'\1', _uttr)
-            dial_list.append(_uttr.strip().lower())
+            _uttr = re.sub(r'([’])\s+', r'\1', _uttr).strip().lower()
+
+            if len(_uttr) > 300:
+                break
+
+            dial_list.append(_uttr)
         
         if dial_turns < 2:
             continue
@@ -43,10 +49,7 @@ def select_data(orig_data, volumn=1200):
 
     assert len(uttr_list) == len(resp_list)
     for uttr, resp in zip(uttr_list, resp_list):
-        temp_dict = dict()
-        temp_dict['uttr'] = uttr
-        temp_dict['resp'] = resp
-        processed.append(temp_dict)
+        processed.append({'x': uttr, 'y': resp})
 
         #End Condition
         volumn_cnt += 1
@@ -56,15 +59,26 @@ def select_data(orig_data, volumn=1200):
     return processed
 
 
-def save_data(data_obj):
-    #split data into train/valid/test sets
-    train, valid, test = data_obj[:-2000], data_obj[-2000:-1000], data_obj[-1000:]
-    data_dict = {k:v for k, v in zip(['train', 'valid', 'test'], [train, valid, test])}
+
+def save_data(data_obj, character=None):
+    if character is None:
+        train, valid, test = data_obj[:-1200], data_obj[-200:-100], data_obj[-100:]
+        data_dict = {k:v for k, v in zip(['train', 'valid', 'test'], [train, valid, test])}
+
+        for key, val in data_dict.items():
+            with open(f'data/{key}.json', 'w') as f:
+                json.dump(val, f)        
+            assert os.path.exists(f'data/{key}.json')
+        return
+
+    train, valid = data_obj[:-1200], data_obj[-100:]
+    data_dict = {k:v for k, v in zip(['train', 'valid'], [train, valid])}
 
     for key, val in data_dict.items():
-        with open(f'data/{key}.json', 'w') as f:
+        with open(f'data/{character}_{key}.json', 'w') as f:
             json.dump(val, f)        
-        assert os.path.exists(f'data/{key}.json')
+        assert os.path.exists(f'data/{character}_{key}.json')    
+
 
 
 
@@ -72,14 +86,14 @@ def get_urls():
     urls = []
     base_url = 'https://transcripts.foreverdreaming.org/viewtopic.php?'
     main_url = 'https://transcripts.foreverdreaming.org/viewforum.php?f=177'
-    post_urls = [main_url + f'&start={78 * i}' if i else main_url for i in range(3)]
+    post_urls = [main_url + f'&start={78 * i}' if i else main_url for i in range(3)][::-1]
     
     for url in post_urls:
         html = requests.get(url)
         soup = bs(html.text, "html.parser")
-        soup.find_all('a', {'class': "topictitle"})        
+        topictitles = soup.find_all('a', {'class': "topictitle"})[1:][::-1][:-1]
 
-        for elem in soup.find_all('a', {'class': "topictitle"})[1:]:
+        for elem in topictitles:
             season = elem.text[:2]
             if int(season) > 6:
                 continue
@@ -160,8 +174,8 @@ def split_dialog(script, char):
 
             if prior_char != char and curr_char == char:        
                 temp = dict()
-                temp['uttr'] = prior_uttr.lower()
-                temp['resp'] = curr_uttr.lower()
+                temp['x'] = prior_uttr.lower()
+                temp['y'] = curr_uttr.lower()
 
                 dialog.append(temp)
 
@@ -172,16 +186,13 @@ def split_dialog(script, char):
 
 
 
-def setup_daily():
-    orig = load_dataset('daily_dialog', split='train')['dialog']
-    selected = select_data(orig)
-    save_data(selected)
+def main(character):
+    ##Setup Daily Dialogue Dataset
+    daily_data = process_dialogue_data()
 
 
-
-def setup_himym(character):
-
-    data = []
+    ##Setup HIMYM Dataset
+    himym_data = []
     urls = get_urls()
     
     for url in urls:
@@ -192,26 +203,21 @@ def setup_himym(character):
         cleaned = clean_script(orig)
         splited = split_script(cleaned)
         dialog = split_dialog(splited, character)
-        data.extend(dialog)
+        himym_data.extend(dialog)
 
-    with open(f'data/{character}.json', 'w') as f:
-        json.dump(data, f)
-    assert os.path.exists(f'data/{character}.json')
+    ##Save Datasets
+    save_data(daily_data)
+    save_data(himym_data, character)
 
 
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('-mode', required=True)
-    parser.add_argument('-char', required=False)
+    parser.add_argument('-character', required=True)
     
     args = parser.parse_args()
-    assert args.mode in ['all', 'pretrain', 'train']
-
-    if args.mode != 'pretrain':
-        setup_daily()
-    if args.mode != 'train':
-        assert args.char in ['ted', 'barney', 'marshall', 'lily', 'robin']
-        setup_himym(args.char)
+    assert args.character in ['ted', 'barney', 'marshall', 'lily', 'robin']
+    
+    main(args.character)
         
