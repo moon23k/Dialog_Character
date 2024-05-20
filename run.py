@@ -1,50 +1,53 @@
-import os, json, argparse, torch
+import os, yaml, argparse, torch
+
+from tokenizers import Tokenizer
+from tokenizers.processors import TemplateProcessing
 
 from module import (
     load_dataloader,
-    load_generator,
-    load_discriminator,
-    PreTrainer,
+    load_model,
     Trainer,
     Tester,
     Generator
 )
 
-from transformers import (
-    set_seed, 
-    BlenderbotSmallTokenizer
-)
+
+
+def set_seed(SEED=42):
+    import random
+    import numpy as np
+    import torch.backends.cudnn as cudnn
+
+    random.seed(SEED)
+    np.random.seed(SEED)
+    torch.manual_seed(SEED)
+    torch.cuda.manual_seed(SEED)
+    torch.cuda.manual_seed_all(SEED)
+    cudnn.benchmark = False
+    cudnn.deterministic = True
 
 
 
 class Config(object):
     def __init__(self, args):    
+        
+        with open('config.yaml', 'r') as f:
+            params = yaml.load(f, Loader=yaml.FullLoader)
+            for group in params.keys():
+                for key, val in params[group].items():
+                    setattr(self, key, val)
 
         self.mode = args.mode
-        self.character = args.char        
-        self.mname = "facebook/blenderbot_small-90M"
+        self.arch = args.arch
+        self.attn = args.attn
+        self.search_method = args.search
+        self.mname = f"{args.arch}_{args.attn}" if args.attn != 'orig'  else args.arch
+        self.ckpt = f'ckpt/{self.mname}_model.pt'
 
-        self.clip = 1
-        self.lr = 5e-5
-        self.max_len = 128
-        self.n_epochs = 10
-        self.batch_size = 32
-        self.iters_to_accumulate = 4
-
-        self.early_stop = True
-        self.patience = 3
-        
         use_cuda = torch.cuda.is_available()
-        self.device_type = 'cuda' if use_cuda else 'cpu'
-
-        if self.mode == 'inference':
-            self.device = torch.device('cpu')
-        else:
-            self.device = torch.device(self.device_type)
-
-        self.g_ckpt = 'ckpt/generator.pt'
-        self.d_ckpt = 'ckpt/discriminator.pt'
-
+        device_condition = use_cuda and self.mode != 'inference'
+        self.device_type = 'cuda' if device_condition else 'cpu'
+        self.device = torch.device(self.device_type)
 
 
     def print_attr(self):
@@ -54,83 +57,60 @@ class Config(object):
 
 
 
-def inference(g_model, g_tokenizer):
-    g_model.eval()
-    print(f'--- Inference Process Started! ---')
-    print('[ Type "quit" on user input to stop the Process ]')
+def load_tokenizer(config):
+    assert os.path.exists(config.tokenizer_path)
+
+    tokenizer = Tokenizer.from_file(config.tokenizer_path)    
+    tokenizer.post_processor = TemplateProcessing(
+        single=f"{config.bos_token} $A {config.eos_token}",
+        special_tokens=[(config.bos_token, config.bos_id), 
+                        (config.eos_token, config.eos_id)]
+        )
     
-    while True:
-        input_seq = input('\nUser Input Sequence >> ').lower()
+    return tokenizer
 
-        #End Condition
-        if input_seq == 'quit':
-            print('\n--- Inference Process has terminated! ---')
-            break        
-
-        #convert user input_seq into model input_ids
-        input_ids = g_tokenizer(input_seq, return_tensors='pt')['input_ids']
-        output_ids = g_model.generate(input_ids, max_new_tokens=128, use_cache=True)
-        output_seq = g_tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0]
-
-        #Search Output Sequence
-        print(f"Model Out Sequence >> {output_seq}")
 
 
 
 def main(args):
-    set_seed(42)
-    config = Config(args)    
-    tokenizer = BlenderbotSmallTokenizer.from_pretrained(
-        config.mname, 
-        model_max_length=config.max_len
-    )
-    setattr(config, 'pad_id', tokenizer.pad_token_id)
+    set_seed()
+    config = Config(args)
+    model = load_model(config)
 
-    g_model = load_generator(config)
-    d_model = load_discriminator(config)
-
-    if config.mode == 'pretrain':
-        train_dataloader = load_dataloader(config, tokenizer, 'valid')
-        valid_dataloader = load_dataloader(config, tokenizer, 'valid')
-        pretrainer = PreTrainer(config, g_model, d_model, train_dataloader, valid_dataloader)
-        pretrainer.train()
-
-    elif config.mode == 'train':
-        train_dataloader = load_dataloader(config, tokenizer, 'valid')
-        valid_dataloader = load_dataloader(config, tokenizer, 'valid')
-        trainer = Trainer(config, g_model, d_model, train_dataloader, valid_dataloader)
+    if config.mode == 'train':
+        train_dataloader = load_dataloader(config, 'train')
+        valid_dataloader = load_dataloader(config, 'valid')
+        trainer = Trainer(config, model, train_dataloader, valid_dataloader)
         trainer.train()
     
     elif config.mode == 'test':
-        test_dataloader = load_dataloader(config, tokenizer, 'test')
-        tester = Tester(config, g_model, d_model, tokenizer, test_dataloader)    
+        tokenizer = load_tokenizer(config)
+        test_dataloader = load_dataloader(config, 'test')
+        tester = Tester(config, model, tokenizer, test_dataloader)
         tester.test()
-
-    elif config.mode == 'inference':
-        inference(g_model, tokenizer)
     
-
+    elif config.mode == 'inference':
+        tokenizer = load_tokenizer(config)
+        generator = Generator(config, model, tokenizer)
+        generator.inference()
+    
 
 
 if __name__ == '__main__':
-
     parser = argparse.ArgumentParser()
     parser.add_argument('-mode', required=True)
-    parser.add_argument('-character', default=None, required=False)
-
+    parser.add_argument('-arch', required=True)
+    parser.add_argument('-attn', required=True)
+    parser.add_argument('-search', default='greedy', required=False)
     
     args = parser.parse_args()
-    assert args.mode.lower() in ['pretrain', 'train', 'test', 'inference']
-    if args.mode == 'pretrain':
-        assert args.character.lower() in ['ted', 'barney', 'marshall', 'lily', 'robin']
+    assert args.mode in ['train', 'test', 'inference']
+    assert args.arch in ['standard', 'evolved']
+    assert args.attn in ['orig', 'linear_half', 'nonlin_half', 'linear_full', 'nonlin_full']
+    assert args.search in ['greedy', 'beam']
 
-
-    if args.mode == 'train':
-        assert os.path.exists('ckpt/generator_base.pt')
-        assert os.path.exists('ckpt/discriminator_base.pt')
-    
-    elif args.mode in ['test', 'inference']:
-        assert os.path.exists('ckpt/discriminator.pt')
-        assert os.path.exists('ckpt/generator.pt')
+    if args.mode != 'train':
+        mname = f"{args.arch}_{args.attn}" if args.attn != 'orig'  else args.arch
+        assert os.path.exists(f'ckpt/{mname}_model.pt')
 
     main(args)

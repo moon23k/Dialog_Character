@@ -1,10 +1,15 @@
 import os, torch
-from model import Generator, Discriminator
-from transformers import (
-    BlenderbotSmallConfig,
-    BlenderbotSmallForConditionalGeneration
-)
+import torch.nn as nn
+from model import StandardTransformer, EvovedTransformer
 
+
+
+
+def init_weights(model):    
+    for name, param in model.named_parameters():
+        if any([x in name for x in ['norm', 'bias']]):
+            continue
+        nn.init.xavier_uniform_(param)    
 
 
 
@@ -31,28 +36,26 @@ def print_model_desc(model):
 
 
 
-def load_generator(config):
-    if config.mode == 'pretrain':
-        generator = BlenderbotSmallForConditionalGeneration.from_pretrained(config.g_mname)
-        print(f"Generator for {config.mode.upper()} has loaded")
-        print_model_desc(generator)
-        return generator.to(config.device)
 
-    generator_config = BlenderbotSmallConfig.from_pretrained(config.g_mname)
-    generator = BlenderbotSmallForConditionalGeneration(generator_config)
-    print(f"Generator for {config.mode.upper()} has loaded")
+def load_model(config):
 
-    if config.mode == 'train':
-        ckpt = config.g_base_ckpt
+    if config.arch == 'standard':
+        model = StandardTransformer(config)
     else:
-        ckpt = config.g_ckpt
+        model = EvolvedTransformer(config)
+
+
+    print(f'{config.mname.upper()} Model has Loaded')
+    init_weights(model)
+
     
-    assert os.path.exists(ckpt)
-    generator_state = torch.load(ckpt, map_location=config.device)['model_state_dict']
-    generator.load_state_dict(generator_state)
+    if config.mode != 'train':
+        ckpt = config.ckpt
+        assert os.path.exists(ckpt)
+        model_state = torch.load(ckpt, map_location=config.device)['model_state_dict']
+        model.load_state_dict(model_state)
+        print(f"Model States has loaded from {ckpt}")
 
-    print(f"Model States has loaded from {ckpt}")
-    print_model_desc(generator)
 
-    return generator.to(config.device)
-
+    print_model_desc(model)
+    return model.to(config.device)

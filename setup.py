@@ -1,223 +1,152 @@
-import os, re, json, requests, argparse
+import os, re, json, yaml, argparse
 from datasets import load_dataset
-from bs4 import BeautifulSoup as bs
+from tokenizers.models import BPE
+from tokenizers import Tokenizer, normalizers
+from tokenizers.trainers import BpeTrainer
+from tokenizers.pre_tokenizers import Whitespace
+from tokenizers.normalizers import NFD, Lowercase, StripAccents
 
 
 
 
-def process_dialogue_data(volumn=1200):
-    volumn_cnt = 0
-    uttr_list, resp_list, processed = [], [], []
-    orig_data = load_dataset('daily_dialog', split='train')['dialog']
+def process_daily():
+    result, corpus = [], []
+    orig_data = load_dataset('daily_dialog')
 
-    for dial in orig_data:
-        dial_list = []
-        dial_turns = len(dial)
-        
-        for uttr in dial:
-            _uttr = re.sub(r"\s([?,.!’](?:\s|$))", r'\1', uttr)
-            _uttr = re.sub(r'([’])\s+', r'\1', _uttr).strip().lower()
+    for split in ['train', 'validation', 'test']:
+        for dial in orig_data[split]['dialog']:
 
-            if len(_uttr) > 300:
-                break
-
-            dial_list.append(_uttr)
-        
-        if dial_turns < 2:
-            continue
-
-        elif dial_turns == 2:
-            uttr_list.append(dial_list[0])
-            resp_list.append(dial_list[1])
-            continue  #To avoid duplicate on below condition
-
-        #Incase of dial_turns is even
-        elif dial_turns % 2 == 0:
-            uttr_list.extend(dial_list[0::2])
-            resp_list.extend(dial_list[1::2])
-
-            uttr_list.extend(dial_list[1:-1:2])
-            resp_list.extend(dial_list[2::2])
-        
-        #Incase of dial_turns is odds
-        elif dial_turns % 2 == 1:
-            uttr_list.extend(dial_list[0:-1:2])
-            resp_list.extend(dial_list[1::2])
-            
-            uttr_list.extend(dial_list[1::2])
-            resp_list.extend(dial_list[2::2])   
-
-    assert len(uttr_list) == len(resp_list)
-    for uttr, resp in zip(uttr_list, resp_list):
-        processed.append({'x': uttr, 'y': resp})
-
-        #End Condition
-        volumn_cnt += 1
-        if volumn_cnt == volumn:
-            break
-    
-    return processed
-
-
-
-def save_data(data_obj, character=None):
-    if character is None:
-        train, valid, test = data_obj[:-1200], data_obj[-200:-100], data_obj[-100:]
-        data_dict = {k:v for k, v in zip(['train', 'valid', 'test'], [train, valid, test])}
-
-        for key, val in data_dict.items():
-            with open(f'data/{key}.json', 'w') as f:
-                json.dump(val, f)        
-            assert os.path.exists(f'data/{key}.json')
-        return
-
-    train, valid = data_obj[:-1200], data_obj[-100:]
-    data_dict = {k:v for k, v in zip(['train', 'valid'], [train, valid])}
-
-    for key, val in data_dict.items():
-        with open(f'data/{character}_{key}.json', 'w') as f:
-            json.dump(val, f)        
-        assert os.path.exists(f'data/{character}_{key}.json')    
-
-
-
-
-def get_urls():
-    urls = []
-    base_url = 'https://transcripts.foreverdreaming.org/viewtopic.php?'
-    main_url = 'https://transcripts.foreverdreaming.org/viewforum.php?f=177'
-    post_urls = [main_url + f'&start={78 * i}' if i else main_url for i in range(3)][::-1]
-    
-    for url in post_urls:
-        html = requests.get(url)
-        soup = bs(html.text, "html.parser")
-        topictitles = soup.find_all('a', {'class': "topictitle"})[1:][::-1][:-1]
-
-        for elem in topictitles:
-            season = elem.text[:2]
-            if int(season) > 6:
+            if max([len(d) for d in dial]) > 100 or len(dial) < 6:
                 continue
 
-            page_param = elem['href'].split('?')[1].split('&')[0]
-            urls.append(base_url + page_param)
+            uttr_list = []
+            for uttr in dial:
+                _uttr = re.sub(r"\s([?,.!’](?:\s|$))", r'\1', uttr)
+                _uttr = re.sub(r'([’])\s+', r'\1', _uttr).strip().lower()
+                uttr_list.append(_uttr)
 
-    return urls
 
+            corpus.extend(uttr_list)
+            while len(uttr_list) >= 6:
+                for i in range(1, len(uttr_list), 2):
+                    elem = {}
+                    elem['hist'] = uttr_list[:i-1] if i > 1 else []
+                    elem['x'] = uttr_list[i-1]
+                    elem['y'] = uttr_list[i]
+                    result.append(elem)
+                    if i > 6:
+                        break
 
+                uttr_list = uttr_list[1:]
 
-def clean_script(script):
-    clear_script = []
-    for line in script:
-        if not line or line.startswith('('): continue
-
-        if line.startswith('[') or ':' not in line:
-            clear_script.append(line)
-            continue
-
-        skip_char = False
-        for char in ['narrator', 'son', 'daughter', '2030', 'voix', 'from']:
-            if char in line.split(":")[0].lower():
-                skip_char = True
-                break
-        
-        if skip_char:
-            continue
-
-        if '(' in line:
-            while True:
-                start_idx = line.find('(')
-                end_idx = line.find(')')
-                line = line[:start_idx-1] + line[end_idx+1:]
-                if '(' not in line:
-                    break
-                    
-        if ':' in line and line.split(':')[1]:
-            clear_script.append(line)
-
-    return clear_script    
+    return result, corpus
 
 
 
-def split_script(script):
-    plot_indice = [idx for idx, line in enumerate(script) if line.startswith('[') or ':' not in line]
 
-    split_indice = []
-    for i in range(len(plot_indice)-1):
-        if plot_indice[i] - plot_indice[i-1] > 2:
-            split_indice.append((plot_indice[i-1] + 1, plot_indice[i]))
+def process_blended():
 
-    splited = []
-    for i in range(len(split_indice)):
-        dialog = script[split_indice[i][0]: split_indice[i][1]]
-        splited.append({'dialogue': dialog})
+    result, corpus = [], []    
+    orig_data = load_dataset('blended_skill_talk')
+
+    for split in ['train', 'validation', 'test']:
+        for elem in orig_data[split]:
+            pre_fn = lambda s: s.lower().strip()
+
+            uttr_list = []
+            for uttr in elem['previous_utterance']:
+                uttr_list.append(pre_fn(uttr))
+
+            for uttr, resp in zip(elem['free_messages'], elem['guided_messages']):
+                uttr_list.append(pre_fn(uttr))
+                uttr_list.append(pre_fn(resp))
+
+            if max([len(x) for x in uttr_list]) > 100 or len(uttr_list) < 14:
+                continue
+
+            corpus.extend(uttr_list)
+            while len(uttr_list) >= 6:
+                for i in range(1, len(uttr_list), 2):
+                    elem = {}
+                    elem['hist'] = uttr_list[:i-1] if i > 1 else []
+                    elem['x'] = uttr_list[i-1]
+                    elem['y'] = uttr_list[i]
+                    result.append(elem)
+                    if i > 6:
+                        break
+
+                uttr_list = uttr_list[1:]
+
+    return result, corpus
+
+
+
+def train_tokenizer(config, corpus):
     
-    return splited    
+    corpus_path = f'data/corpus.txt'
+    with open(corpus_path, 'w') as f:
+        f.write('\n'.join(corpus))    
 
-
-
-def split_dialog(script, char):
-    dialog = []
-    prior_char, prior_uttr = '', ''
-
-    for dial in script:
-        for line in dial['dialogue']:
-            curr_char = line.split(':')[0].lower().strip()
-            curr_uttr = ''.join(line.split(':')[1:]).strip()
-            
-            if not prior_char:
-                if curr_char == char:
-                    continue
-
-                prior_char = curr_char
-                prior_uttr = curr_uttr
-                continue 
-
-            if prior_char != char and curr_char == char:        
-                temp = dict()
-                temp['x'] = prior_uttr.lower()
-                temp['y'] = curr_uttr.lower()
-
-                dialog.append(temp)
-
-            prior_char = curr_char
-            prior_uttr = curr_uttr
-
-    return dialog    
-
-
-
-def main(character):
-    ##Setup Daily Dialogue Dataset
-    daily_data = process_dialogue_data()
-
-
-    ##Setup HIMYM Dataset
-    himym_data = []
-    urls = get_urls()
+    assert os.path.exists(corpus_path)
+    assert os.path.exists('config.yaml')
     
-    for url in urls:
-        html = requests.get(url)
-        soup = bs(html.text, "html.parser")
-        orig = soup.select(".content")[0].text.split('\n')
-
-        cleaned = clean_script(orig)
-        splited = split_script(cleaned)
-        dialog = split_dialog(splited, character)
-        himym_data.extend(dialog)
-
-    ##Save Datasets
-    save_data(daily_data)
-    save_data(himym_data, character)
+    with open('config.yaml', 'r') as f:
+        vocab_config = yaml.load(f, Loader=yaml.FullLoader)['vocab']
 
 
+    tokenizer = Tokenizer(BPE(unk_token=vocab_config['unk_token']))
+    tokenizer.normalizer = normalizers.Sequence([NFD(), Lowercase(), StripAccents()])
+    tokenizer.pre_tokenizer = Whitespace()
+    trainer = BpeTrainer(
+        vocab_size=vocab_config['vocab_size'], 
+        special_tokens=[
+            vocab_config['pad_token'], 
+            vocab_config['unk_token'],
+            vocab_config['bos_token'],
+            vocab_config['eos_token']
+            ]
+        )
+
+    tokenizer.train(files=[corpus_path], trainer=trainer)
+    tokenizer.save("data/tokenizer.json")
+
+
+
+
+
+def save_data(data_obj):
+    #split data into train/valid/test sets
+    train, valid, test = data_obj[:-5100], data_obj[-5100:-100], data_obj[-100:]
+    data_dict = {k:v for k, v in zip(['train', 'valid', 'test'], [train, valid, test])}
+
+    for key, val in data_dict.items():
+        with open(f'data/{key}.json', 'w') as f:
+            json.dump(val, f)        
+        assert os.path.exists(f'data/{key}.json')
+
+
+
+
+def main(dataset):
+    if dataset == 'daily':
+        data, corpus = process_daily()
+    elif dataset == 'blended':
+        data, corpus = process_blended()
+    else:
+        daily_data, daily_corpus = process_daily()
+        blend_data, blend_corpus = process_blended()
+        data, corpus = daily_data + blend_data, daily_corpus + blend_corpus 
+
+    train_tokenizer(corpus)
+
+    return
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('-character', required=True)
+    parser.add_argument('-dataset', required=True)
     
     args = parser.parse_args()
-    assert args.character in ['ted', 'barney', 'marshall', 'lily', 'robin']
+    assert args.dataset in ['all', 'daily', 'blended']
     
-    main(args.character)
-        
+    main(args.dataset)
