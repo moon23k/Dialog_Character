@@ -11,6 +11,35 @@ def clones(module, N):
 
 
 
+class SublayerConnection(nn.Module):
+    def __init__(self, config):
+        super(SublayerConnection, self).__init__()
+        self.norm = nn.LayerNorm(config.hidden_dim)
+        self.dropout = nn.Dropout(config.dropout_ratio)
+
+    def forward(self, x, sublayer):
+        return x + self.dropout(sublayer(self.norm(x)))
+
+
+
+class PositionwiseFeedForward(nn.Module):
+    def __init__(self, config):
+        super(PositionwiseFeedForward, self).__init__()
+        
+        self.w_1 = nn.Linear(config.hidden_dim, config.pff_dim)
+        self.w_2 = nn.Linear(config.pff_dim, config.hidden_dim)
+        
+        self.norm = nn.LayerNorm(config.hidden_dim)
+        self.dropout1 = nn.Dropout(config.dropout_ratio)
+        self.dropout2 = nn.Dropout(config.dropout_ratio)
+
+
+    def forward(self, x):
+        x = self.norm(x)
+        x = self.w_2(self.dropout1(F.gelu(self.w_1(x))))
+        return self.dropout2(x)
+
+
 
 class MultiHeadAttention(nn.Module):
     def __init__(self, config):
@@ -147,30 +176,6 @@ class Embeddings(nn.Module):
             return out
         return self.fc_dropout(self.fc(out))
 
-
-
-
-class PositionwiseFeedForward(nn.Module):
-    def __init__(self, config):
-        super(PositionwiseFeedForward, self).__init__()
-        self.w_1 = nn.Linear(config.hidden_dim, config.pff_dim)
-        self.w_2 = nn.Linear(config.pff_dim, config.hidden_dim)
-        self.dropout = nn.Dropout(config.dropout_ratio)
-
-    def forward(self, x):
-        return self.w_2(self.dropout(F.gelu(self.w_1(x))))
-
-
-
-
-class SublayerConnection(nn.Module):
-    def __init__(self, config):
-        super(SublayerConnection, self).__init__()
-        self.norm = nn.LayerNorm(config.hidden_dim)
-        self.dropout = nn.Dropout(config.dropout_ratio)
-
-    def forward(self, x, sublayer):
-        return x + self.dropout(sublayer(self.norm(x)))
 
 
 

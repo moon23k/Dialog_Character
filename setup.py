@@ -1,10 +1,12 @@
 import os, re, json, yaml, argparse
+from itertools import zip_longest
 from datasets import load_dataset
 from tokenizers.models import BPE
 from tokenizers import Tokenizer, normalizers
 from tokenizers.trainers import BpeTrainer
 from tokenizers.pre_tokenizers import Whitespace
 from tokenizers.normalizers import NFD, Lowercase, StripAccents
+
 
 
 
@@ -81,18 +83,17 @@ def process_blended():
 
 
 
-def train_tokenizer(config, corpus):
-    
+
+def train_tokenizer(corpus):
+      
     corpus_path = f'data/corpus.txt'
     with open(corpus_path, 'w') as f:
-        f.write('\n'.join(corpus))    
-
+        f.write('\n'.join(corpus))
     assert os.path.exists(corpus_path)
-    assert os.path.exists('config.yaml')
-    
-    with open('config.yaml', 'r') as f:
-        vocab_config = yaml.load(f, Loader=yaml.FullLoader)['vocab']
 
+    assert os.path.exists('config.yaml')
+    with open('config.yaml', 'r') as f:
+        vocab_config = yaml.load(f, Loader=yaml.FullLoader)['tokenizer']
 
     tokenizer = Tokenizer(BPE(unk_token=vocab_config['unk_token']))
     tokenizer.normalizer = normalizers.Sequence([NFD(), Lowercase(), StripAccents()])
@@ -113,16 +114,31 @@ def train_tokenizer(config, corpus):
 
 
 
-
-def save_data(data_obj):
-    #split data into train/valid/test sets
-    train, valid, test = data_obj[:-5100], data_obj[-5100:-100], data_obj[-100:]
-    data_dict = {k:v for k, v in zip(['train', 'valid', 'test'], [train, valid, test])}
-
+def save_data(data_dict):
     for key, val in data_dict.items():
         with open(f'data/{key}.json', 'w') as f:
             json.dump(val, f)        
         assert os.path.exists(f'data/{key}.json')
+
+
+
+
+def split_data(data):
+    volumn = 25100
+    
+    filter_fn = lambda data, condition: [elem for elem in data if condition(elem)][:volumn]
+
+    single_data = filter_fn(data, lambda elem: len(elem['hist']) == 0)
+    double_data = filter_fn(data, lambda elem: len(elem['hist']) == 2)
+    triple_data = filter_fn(data, lambda elem: len(elem['hist']) == 4)
+
+    uniform_data = [elem for triple in zip_longest(single_data, double_data, triple_data) for elem in triple]
+
+    train_data, valid_data, test_data = uniform_data[:-5300], uniform_data[-5300:-300], uniform_data[-300:]
+    data_dict = {'train': train_data, 'valid': valid_data, 'test': test_data}
+    
+    return data_dict
+
 
 
 
@@ -138,8 +154,10 @@ def main(dataset):
         data, corpus = daily_data + blend_data, daily_corpus + blend_corpus 
 
     train_tokenizer(corpus)
+    data_dict = split_data(data)
+    save_data(data_dict)
 
-    return
+
 
 
 if __name__ == '__main__':

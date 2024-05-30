@@ -1,15 +1,11 @@
 import os, yaml, argparse, torch
-
 from tokenizers import Tokenizer
 from tokenizers.processors import TemplateProcessing
-
 from module import (
-    load_dataloader,
-    load_model,
-    Trainer,
-    Tester,
-    Generator
+    load_dataloader, load_model,
+    Trainer, Tester, SeqGenerator
 )
+
 
 
 
@@ -28,6 +24,7 @@ def set_seed(SEED=42):
 
 
 
+
 class Config(object):
     def __init__(self, args):    
         
@@ -38,10 +35,10 @@ class Config(object):
                     setattr(self, key, val)
 
         self.mode = args.mode
-        self.arch = args.arch
-        self.attn = args.attn
+        self.model_base = args.model_base
+        self.model_type = args.model_type
         self.search_method = args.search
-        self.mname = f"{args.arch}_{args.attn}" if args.attn != 'orig'  else args.arch
+        self.mname = f"{self.model_base}_{self.model_type}"
         self.ckpt = f'ckpt/{self.mname}_model.pt'
 
         use_cuda = torch.cuda.is_available()
@@ -91,23 +88,24 @@ def main(args):
     
     elif config.mode == 'inference':
         tokenizer = load_tokenizer(config)
-        generator = Generator(config, model, tokenizer)
+        generator = SeqGenerator(config, model, tokenizer)
         generator.inference()
     
+
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-mode', required=True)
-    parser.add_argument('-arch', required=True)
-    parser.add_argument('-attn', required=True)
+    parser.add_argument('-model_base', required=True)
+    parser.add_argument('-model_type', required=True)
     parser.add_argument('-search', default='greedy', required=False)
     
     args = parser.parse_args()
-    assert args.mode in ['train', 'test', 'inference']
-    assert args.arch in ['standard', 'evolved']
-    assert args.attn in ['orig', 'linear_half', 'nonlin_half', 'linear_full', 'nonlin_full']
-    assert args.search in ['greedy', 'beam']
+    assert args.mode.lower() in ['train', 'test', 'inference']
+    assert args.model_base.lower() in ['standard', 'evolved']
+    assert args.model_type.lower() in ['parallel', 'sequential']
+    assert args.search.lower() in ['greedy', 'beam']
 
     if args.mode != 'train':
         mname = f"{args.arch}_{args.attn}" if args.attn != 'orig'  else args.arch
