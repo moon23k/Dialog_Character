@@ -73,10 +73,12 @@ def main(args):
     set_seed()
     config = Config(args)
     model = load_model(config)
+    tokenizer = load_tokenizer(config)
+
 
     if config.mode == 'train':
-        train_dataloader = load_dataloader(config, 'train')
-        valid_dataloader = load_dataloader(config, 'valid')
+        train_dataloader = load_dataloader(config, tokenizer, 'train')
+        valid_dataloader = load_dataloader(config, tokenizer, 'valid')
         trainer = Trainer(config, model, train_dataloader, valid_dataloader)
         trainer.train()
     

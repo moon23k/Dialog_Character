@@ -3,8 +3,7 @@ import torch.nn as nn
 import torch.nn.init as init
 from torch.nn import functional as F
 from collections import namedtuple
-from .common import clones, Embeddings
-from .standard import StandardDecoder
+from .common import clones, Embeddings, ModelBase
 
 
 
@@ -313,45 +312,20 @@ class EvolvedDecoder(nn.Module):
 
 
 
-class EvolvedTransformer(nn.Module):
+class EvolvedTransformer(ModelBase):
     def __init__(self, config):
-        super(EvolvedTransformer, self).__init__()
-        
-        self.pad_id = config.pad_id
-        self.device = config.device
-        self.vocab_size = config.vocab_size
+        super(EvolvedTransformer, self).__init__(config)
 
+        self.hist_encoder = EvolvedEncoder(config)
         self.encoder = EvolvedEncoder(config)
 
-        if config.model_type == 'evolved':
-            self.decoder = EvolvedDecoder(config)
-        elif config.model_type == 'evolved_hybrid':
-            self.decoder = StandardDecoder(config)
-
-        self.generator = nn.Linear(config.hidden_dim, config.vocab_size)
-
-        self.criterion = nn.CrossEntropyLoss()
-        self.out = namedtuple('Out', 'logit loss')
 
 
-    @staticmethod    
-    def shift_y(x):
-        return x[:, :-1], x[:, 1:]    
-
-
-    def pad_mask(self, x):
-        return x == self.pad_id
-
-    def dec_mask(self, x):
-        sz = x.size(1)
-        return torch.triu(torch.full((sz, sz), float('-inf')), diagonal=1).to(self.device)
-
-
-    def forward(self, x, y):
+    def forward(self, hist, x, y):
         y, label = self.shift_y(y)
 
         e_mask = self.pad_mask(x)
-        d_mask = self.dec_mask(y)
+        d_mask = self.causal_mask(y)
 
         memory = self.encoder(x, e_mask)
         dec_out = self.decoder(y, memory, e_mask, d_mask)

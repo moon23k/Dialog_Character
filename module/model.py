@@ -1,6 +1,6 @@
 import os, torch
 import torch.nn as nn
-from model import StandardTransformer, EvovedTransformer
+from model import StandardTransformer, EvolvedTransformer
 
 
 
@@ -39,7 +39,7 @@ def print_model_desc(model):
 
 def load_model(config):
 
-    if config.arch == 'standard':
+    if config.model_base == 'standard':
         model = StandardTransformer(config)
     else:
         model = EvolvedTransformer(config)

@@ -14,7 +14,7 @@ class Tester:
         self.mname = config.mname
         self.bos_id = config.bos_id
         self.device = config.device
-        self.max_len = config.full_len
+        self.max_len = config.max_len
         self.metric_module = evaluate.load('rouge')
 
 
