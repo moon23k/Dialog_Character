@@ -1,4 +1,4 @@
-import math, torch, evaluate
+import torch, evaluate
 import torch.nn as nn
 
 

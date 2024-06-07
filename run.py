@@ -37,14 +37,28 @@ class Config(object):
         self.mode = args.mode
         self.model_base = args.model_base
         self.model_type = args.model_type
+        self.hist_apply = args.model_type
         self.search_method = args.search
-        self.mname = f"{self.model_base}_{self.model_type}"
+
+        self.set_mname(args)
         self.ckpt = f'ckpt/{self.mname}_model.pt'
 
         use_cuda = torch.cuda.is_available()
         device_condition = use_cuda and self.mode != 'inference'
         self.device_type = 'cuda' if device_condition else 'cpu'
         self.device = torch.device(self.device_type)
+
+
+    def set_mname(args):
+        model_base_dict = {'standard': 'Std', 'evolved': 'Evo'}
+        model_type_dict = {'parallel': 'Par', 'sequential': 'Seq'}
+        hist_apply_dict = {'encoder': 'Enc', 'decoder': 'Dec', 'enc_dec': 'EncDec'}
+
+        mname = f"{model_base_dict[args.model_base]}_\
+                  {model_type_dict[args.model_type]}_\
+                  {hist_apply_dict[args.hist_apply]}"
+        setattr(self, 'mname', mname)
+
 
 
     def print_attr(self):
@@ -101,16 +115,14 @@ if __name__ == '__main__':
     parser.add_argument('-mode', required=True)
     parser.add_argument('-model_base', required=True)
     parser.add_argument('-model_type', required=True)
+    parser.add_argument('-hist_apply', required=True)
     parser.add_argument('-search', default='greedy', required=False)
     
     args = parser.parse_args()
     assert args.mode.lower() in ['train', 'test', 'inference']
     assert args.model_base.lower() in ['standard', 'evolved']
     assert args.model_type.lower() in ['parallel', 'sequential']
+    assert args.hist_apply.lower() in ['encoder', 'decoder', 'enc_dec']
     assert args.search.lower() in ['greedy', 'beam']
-
-    if args.mode != 'train':
-        mname = f"{args.arch}_{args.attn}" if args.attn != 'orig'  else args.arch
-        assert os.path.exists(f'ckpt/{mname}_model.pt')
 
     main(args)

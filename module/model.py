@@ -1,6 +1,9 @@
 import os, torch
 import torch.nn as nn
-from model import StandardTransformer, EvolvedTransformer
+from model import (
+    StdParallelModel, StdSequentialModel, 
+    EvoParallelModel, EvoSequentialModel
+)
 
 
 
@@ -39,10 +42,18 @@ def print_model_desc(model):
 
 def load_model(config):
 
-    if config.model_base == 'standard':
-        model = StandardTransformer(config)
-    else:
-        model = EvolvedTransformer(config)
+    model_classes = {
+        ('standard', 'parallel'): StdParallelModel,
+        ('standard', 'sequential'): StdSequentialModel,
+        ('evolved', 'parallel'): EvoParallelModel,
+        ('evolved', 'sequential'): EvoSequentialModel
+    }
+
+    model_class = model_classes.get((config.model_base, config.model_type))
+    if model_class is None:
+        raise ValueError("Invalid model_base or model_type value")
+
+    model = model_class(config)
 
 
     print(f'{config.mname.upper()} Model has Loaded')

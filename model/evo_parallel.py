@@ -312,9 +312,9 @@ class EvolvedDecoder(nn.Module):
 
 
 
-class EvolvedTransformer(ModelBase):
+class EvoParallelModel(ModelBase):
     def __init__(self, config):
-        super(EvolvedTransformer, self).__init__(config)
+        super(EvoParallelModel, self).__init__(config)
 
         self.hist_encoder = EvolvedEncoder(config)
         self.encoder = EvolvedEncoder(config)
