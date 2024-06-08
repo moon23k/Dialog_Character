@@ -1,9 +1,6 @@
 import os, torch
 import torch.nn as nn
-from model import (
-    StdParallelModel, StdSequentialModel, 
-    EvoParallelModel, EvoSequentialModel
-)
+from model import HistModel
 
 
 
@@ -41,20 +38,7 @@ def print_model_desc(model):
 
 
 def load_model(config):
-
-    model_classes = {
-        ('standard', 'parallel'): StdParallelModel,
-        ('standard', 'sequential'): StdSequentialModel,
-        ('evolved', 'parallel'): EvoParallelModel,
-        ('evolved', 'sequential'): EvoSequentialModel
-    }
-
-    model_class = model_classes.get((config.model_base, config.model_type))
-    if model_class is None:
-        raise ValueError("Invalid model_base or model_type value")
-
-    model = model_class(config)
-
+    model = HistModel(config)
 
     print(f'{config.mname.upper()} Model has Loaded')
     init_weights(model)
