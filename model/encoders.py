@@ -20,7 +20,9 @@ class EncoderCell(nn.Module):
         self.glu = GatedConvolution(config.hidden_dim)
         
         self.attention = nn.MultiheadAttention(
-            config.hidden_dim, config.n_heads, batch_first=True
+            embed_dim=config.hidden_dim,
+            num_heads=config.n_heads,
+            batch_first=True
         )
 
         self.mid_layer_norm = nn.LayerNorm(config.pff_dim)
@@ -102,42 +104,34 @@ class EncoderCell(nn.Module):
         ### Block_05 & 06
         out = self.layer_norms[3](B04_out)
         out = self.pff(out) + B04_out #Dim:512
+
         return out 
 
 
 
-class LayerBase(nn.Module):
-    def __init__(self, config):
-        super(LayerBase, self).__init__()
-        
-        self.attn_params = {
+
+class StandardEncoderLayer(nn.Module):
+    def __init__(self, config, fusion_flag=False):
+        super(StandardEncoderLayer, self).__init__()
+
+        attn_params = {
             'embed_dim': config.hidden_dim,
             'num_heads': config.n_heads,
             'batch_first': True
         }
+        self.fusion_flag = fusion_flag
 
-        self.enc_fuse = config.enc_fuse
-        self.dec_fuse = config.dec_fuse
-
-        if self.enc_fuse or self.dec_fuse:
-            self.ple_attn = nn.MultiheadAttention(**self.attn_params)
-
-
-
-class StandardEncoderLayer(nn.Module):
-    def __init__(self, config):
-        super(StandardEncoderLayer, self).__init__()
-
-        self.self_attn = nn.MultiheadAttention(**self.attn_params)
+        self.self_attn = nn.MultiheadAttention(**attn_params)
         self.pff = PositionwiseFeedForward(config)
         
-        if self.enc_fuse:
+        if fusion_flag:
             self.sublayer = clones(SublayerConnection(config), 3)
+            self.hist_attn = nn.MultiheadAttention(**attn_params)
         else:
             self.sublayer = clones(SublayerConnection(config), 2)
 
 
-    def forward(self, x, p_proj, e_mask):
+    def forward(self, x, e_mask, h_mem=None, h_mask=None):
 
         x = self.sublayer[0](
             x, 
@@ -148,12 +142,12 @@ class StandardEncoderLayer(nn.Module):
             )[0]
         )
 
-        if self.enc_fuse:            
+        if self.fusion_flag:            
             x = self.sublayer[1](
                 x, 
-                lambda x: self.ple_attn(
-                    x, p_proj, p_proj, 
-                    key_padding_mask=e_mask,
+                lambda x: self.hist_attn(
+                    x, h_mem, h_mem, 
+                    key_padding_mask=h_mask,
                     need_weights=False
                 )[0]
             )
@@ -164,28 +158,9 @@ class StandardEncoderLayer(nn.Module):
 
 
 
-class EncoderBase(nn.Module):
+class EvolvedEncoder(nn.Module):
     def __init__(self, config):
-        super(EncoderBase, self).__init__()
-
-        self.attn_params = {
-            'embed_dim': config.hidden_dim,
-            'num_heads': config.n_heads,
-            'batch_first': True
-        }
-
-        self.emb_mapping = nn.Sequential(
-            nn.Linear(config.emb_dim, config.hidden_dim),
-            nn.Dropout(config.dropout_ratio)
-        )
-
-
-
-
-class EvolvedEncoder(EncoderBase):
-    def __init__(self, config):
-        super(EvolvedEncoder, self).__init__(config)
-
+        super(EvolvedEncoder, self).__init__()
         self.embeddings = Embeddings(config)
         self.cells = clones(EncoderCell(config), config.n_layers//2)
 
@@ -199,48 +174,16 @@ class EvolvedEncoder(EncoderBase):
 
 
 
-class StandardEncoder(EncoderBase):
-    def __init__(self, config):
-        super(StandardEncoder, self).__init__(config)
-
-        self.emb_mapping = nn.Sequential(
-            nn.Linear(config.emb_dim, config.hidden_dim),
-            nn.Dropout(config.dropout_ratio)
-        )
-        self.layers = clones(StandardEncoderLayer(config), config.n_layers)
+class StandardEncoder(nn.Module):
+    def __init__(self, config, fusion_flag=False):
+        super(StandardEncoder, self).__init__()
+        self.embeddings = Embeddings(config)
+        self.layers = clones(StandardEncoderLayer(config, fusion_flag), config.n_layers)
         self.norm = nn.LayerNorm(config.hidden_dim)
 
 
-
-    def forward(self, x, ple_out=None, e_mask=None):
-
-        x = self.emb_mapping(x)
-
+    def forward(self, x, e_mask, h_mem=None, h_mask=None):
+        x = self.embeddings(x)
         for layer in self.layers:
-            x = layer(x, ple_out, e_mask)
-
-        return self.norm(x)        
-
-
-
-class FusionEncoder(EncoderBase):
-    def __init__(self, config):
-        super(StandardEncoder, self).__init__(config)
-
-        self.emb_mapping = nn.Sequential(
-            nn.Linear(config.emb_dim, config.hidden_dim),
-            nn.Dropout(config.dropout_ratio)
-        )
-        self.layers = clones(StandardEncoderLayer(config), config.n_layers)
-        self.norm = nn.LayerNorm(config.hidden_dim)
-
-
-
-    def forward(self, x, ple_out=None, e_mask=None):
-
-        x = self.emb_mapping(x)
-
-        for layer in self.layers:
-            x = layer(x, ple_out, e_mask)
-
-        return self.norm(x)                
+            x = layer(x, e_mask, h_mem, h_mask)
+        return self.norm(x)

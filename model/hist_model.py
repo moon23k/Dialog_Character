@@ -1,29 +1,41 @@
 import torch
 import torch.nn as nn
-import torch.nn.init as init
-from torch.nn import functional as F
+from collections import namedtuple
 from .components import clones, Embeddings
-from .encoders import StandardEncoder, EvolvedEncoder
+from .encoders import (
+    SublayerConnection, 
+    PositionwiseFeedForward,
+    StandardEncoder, EvolvedEncoder
+)
 
 
 
 
 
-class DecoderLayer(LayerBase):
-    def __init__(self, config):
-        super(DecoderLayer, self).__init__(config)
 
-        self.self_attn = nn.MultiheadAttention(**self.attn_params)
-        self.cross_attn = nn.MultiheadAttention(**self.attn_params)
+class DecoderLayer(nn.Module):
+    def __init__(self, config, fusion_flag=False):
+        super(DecoderLayer, self).__init__()
+
+        attn_params = {
+            'embed_dim': config.hidden_dim,
+            'num_heads': config.n_heads,
+            'batch_first': True
+        }
+        self.fusion_flag = fusion_flag
+
+        self.self_attn = nn.MultiheadAttention(**attn_params)
+        self.cross_attn = nn.MultiheadAttention(**attn_params)
         self.pff = PositionwiseFeedForward(config)
 
-        if self.dec_fuse:
+        if fusion_flag:
             self.sublayer = clones(SublayerConnection(config), 4)
+            self.hist_attn = nn.MultiheadAttention(**attn_params)
         else:
             self.sublayer = clones(SublayerConnection(config), 3)
 
 
-    def forward(self, x, memory, p_proj, e_mask=None, d_mask=None):
+    def forward(self, x, e_mem, e_mask, d_mask, h_mem=None, h_mask=None):
         
         x = self.sublayer[0](
             x, 
@@ -37,18 +49,18 @@ class DecoderLayer(LayerBase):
         x = self.sublayer[1](
             x, 
             lambda x: self.cross_attn(
-                x, memory, memory, 
+                x, e_mem, e_mem, 
                 key_padding_mask=e_mask,
                 need_weights=False
             )[0]
         )
 
-        if self.dec_fuse:
+        if self.fusion_flag:
             x = self.sublayer[2](
                 x, 
-                lambda x: self.ple_attn(
-                    x, p_proj, p_proj, 
-                    key_padding_mask=e_mask,
+                lambda x: self.hist_attn(
+                    x, h_mem, h_mem, 
+                    key_padding_mask=h_mask,
                     need_weights=False
                 )[0]
             )
@@ -63,40 +75,35 @@ class DecoderLayer(LayerBase):
 
 
 class Decoder(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, fusion_flag):
         super(Decoder, self).__init__()
 
-        self.emb_mapping = nn.Sequential(
-            nn.Linear(config.emb_dim, config.hidden_dim),
-            nn.Dropout(config.dropout_ratio)
-        )
-        
-        self.layers = clones(DecoderLayer(config), config.n_layers)
+        self.embeddings = Embeddings(config)
+        self.layers = clones(DecoderLayer(config, fusion_flag), config.n_layers)
         self.norm = nn.LayerNorm(config.hidden_dim)
         
 
 
-    def forward(self, x, memory, ple_out=None, e_mask=None, d_mask=None):
-        
-        x = self.emb_mapping(x)
-        
+    def forward(self, x, e_mem, e_mask, d_mask, h_mem=None, h_mask=None):
+        x = self.embeddings(x)
         for layer in self.layers:
-            x = layer(x, memory, ple_out, e_mask, d_mask)
-
+            x = layer(x, e_mem, e_mask, d_mask, h_mem, h_mask)
         return self.norm(x)
 
 
 
 
 
-class HistModel(ModelBase):
+class HistModel(nn.Module):
     def __init__(self, config):
-        super(HistModel, self).__init__(config)
+        super(HistModel, self).__init__()
 
         #Attr Setup
         self.device = config.device
         self.pad_id = config.pad_id
         self.vocab_size = config.vocab_size
+        self.enc_fuse = config.enc_fuse
+        self.dec_fuse = config.dec_fuse
 
         
         #Module Setup
@@ -104,9 +111,9 @@ class HistModel(ModelBase):
             self.hist_encoder = StandardEncoder(config)
         else:
             self.hist_encoder = EvolvedEncoder(config)
-        
-        self.encoder = StandardEncoder(config)
-        self.decoder = Decoder(config)
+
+        self.encoder = StandardEncoder(config, self.enc_fuse)
+        self.decoder = Decoder(config, self.dec_fuse)
         self.generator = nn.Linear(config.hidden_dim, self.vocab_size)
 
 
@@ -130,15 +137,26 @@ class HistModel(ModelBase):
 
 
     def forward(self, hist, x, y):
+        #Prerequisites
         y, label = self.shift_y(y)
-
+        h_mask = self.pad_mask(hist)
         e_mask = self.pad_mask(x)
         d_mask = self.causal_mask(y)
 
-        memory = self.encoder(x, e_mask)
-        dec_out = self.decoder(y, memory, e_mask, d_mask)
+        #Actual Process
+        h_mem = self.hist_encoder(hist, h_mask)
 
-        logit = self.generator(dec_out)
+        if self.enc_fuse:
+            e_mem = self.encoder(x, e_mask, h_mem, h_mask)
+        else:
+            e_mem = self.encoder(x, e_mask)
+
+        if self.dec_fuse:
+            d_out = self.decoder(y, e_mem, e_mask, d_mask, h_mem, h_mask)
+        else:
+            d_out = self.decoder(y, e_mem, e_mask, d_mask)
+
+        logit = self.generator(d_out)
         
         #Getting Outputs
         self.out.logit = logit

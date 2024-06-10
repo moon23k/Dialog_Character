@@ -88,7 +88,7 @@ def main(args):
     
     elif config.mode == 'test':
         tokenizer = load_tokenizer(config)
-        test_dataloader = load_dataloader(config, 'test')
+        test_dataloader = load_dataloader(config, tokenizer, 'test')
         tester = Tester(config, model, tokenizer, test_dataloader)
         tester.test()
     

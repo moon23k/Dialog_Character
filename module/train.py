@@ -24,7 +24,8 @@ class Trainer:
         self.scaler = torch.cuda.amp.GradScaler()
         self.iters_to_accumulate = config.iters_to_accumulate        
 
-        self.optimizer = AdamW(self.model.parameters(), lr=config.lr)
+        #self.optimizer = AdamW(self.model.parameters(), lr=config.lr)
+        self.optimizer = AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=config.lr)
         self.lr_scheduler = ReduceLROnPlateau(self.optimizer, patience=2)
 
         self.ckpt = config.ckpt
