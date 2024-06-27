@@ -53,7 +53,7 @@ def process_blended():
 
     for split in ['train', 'validation', 'test']:
         for elem in orig_data[split]:
-            pre_fn = lambda s: s.lower().strip()
+            pre_fn = lambda s: s.lower().strip().replace('  ', ' ')
 
             uttr_list = []
             for uttr in elem['previous_utterance']:
